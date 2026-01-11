@@ -58,14 +58,18 @@ class GetChapterContentExecutor(BaseToolExecutor):
         if len(chapter_numbers) > 5:
             return "一次最多获取5个章节的内容"
         for num in chapter_numbers:
-            if not isinstance(num, int) or num < 1:
+            try:
+                num_int = int(num)
+                if num_int < 1:
+                    return f"无效的章节号: {num}"
+            except (ValueError, TypeError):
                 return f"无效的章节号: {num}"
         return None
 
     async def execute(self, project_id: str, params: Dict[str, Any]) -> ToolResult:
         from ....repositories.novel_repository import NovelRepository
 
-        chapter_numbers = params["chapter_numbers"]
+        chapter_numbers = [int(n) for n in params["chapter_numbers"]]
 
         repo = NovelRepository(self.session)
         project = await repo.get_by_id(project_id)

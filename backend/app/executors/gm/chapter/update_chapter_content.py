@@ -65,8 +65,14 @@ class UpdateChapterContentExecutor(BaseToolExecutor):
 
     async def validate_params(self, params: Dict[str, Any]) -> Optional[str]:
         chapter_number = params.get("chapter_number")
-        if not chapter_number or not isinstance(chapter_number, int) or chapter_number < 1:
+        if chapter_number is None:
             return "必须指定有效的章节号"
+        try:
+            chapter_number = int(chapter_number)
+            if chapter_number < 1:
+                return "章节号必须大于0"
+        except (ValueError, TypeError):
+            return "章节号必须是有效的整数"
 
         new_content = params.get("new_content")
         if not new_content or not isinstance(new_content, str):
@@ -83,7 +89,7 @@ class UpdateChapterContentExecutor(BaseToolExecutor):
     async def execute(self, project_id: str, params: Dict[str, Any]) -> ToolResult:
         from ....repositories.novel_repository import NovelRepository
 
-        chapter_number = params["chapter_number"]
+        chapter_number = int(params["chapter_number"])
         new_content = params["new_content"].strip()
         modification_reason = params.get("modification_reason", "")
 

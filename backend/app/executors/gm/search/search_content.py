@@ -68,7 +68,12 @@ class SearchContentExecutor(BaseToolExecutor):
 
         query = params["query"].strip()
         search_type = params.get("search_type", "both")
-        top_k = params.get("top_k", 5)
+
+        # 确保 top_k 是整数
+        try:
+            top_k = int(params.get("top_k", 5))
+        except (ValueError, TypeError):
+            top_k = 5
 
         if top_k < 1:
             top_k = 5
