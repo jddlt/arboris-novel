@@ -2,8 +2,10 @@
 
 from .get_chapter_content import GetChapterContentExecutor
 from .update_chapter_content import UpdateChapterContentExecutor
+from .clear_chapter_content import ClearChapterContentExecutor
 
 __all__ = [
     "GetChapterContentExecutor",
     "UpdateChapterContentExecutor",
+    "ClearChapterContentExecutor",
 ]

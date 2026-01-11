@@ -36,6 +36,7 @@
 ### 章节内容管理
 - **get_chapter_content**: 获取已完成章节的正文内容
 - **update_chapter_content**: 修改已完成章节的正文内容
+- **clear_chapter_content**: 清空章节内容，将其重置为未生成状态（用于需要重新生成的场景）
 
 ### 搜索能力
 - **search_content**: 搜索小说内容（基于 RAG 向量检索）
