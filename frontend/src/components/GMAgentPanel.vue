@@ -10,6 +10,16 @@
         <span class="font-semibold">AI 助手</span>
       </div>
       <div class="flex items-center gap-2">
+        <!-- 清除当前对话按钮 -->
+        <button
+          @click="clearCurrentConversation"
+          class="p-1.5 hover:bg-white/20 rounded-lg transition-colors"
+          title="清除对话"
+        >
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+          </svg>
+        </button>
         <!-- 历史对话按钮 -->
         <button
           @click="toggleHistoryPanel"
@@ -340,6 +350,7 @@ import {
   discardActions,
   getConversations,
   getConversationDetail,
+  archiveConversation,
   type GMPendingAction,
   type ConversationMessage,
   type ConversationSummary,
@@ -827,6 +838,26 @@ function startNewConversation() {
   streamingContent.value = ''
   showHistoryPanel.value = false
   // 清除 localStorage 中的对话
+  localStorage.removeItem(getStorageKey())
+}
+
+// 清除当前对话（归档后清空，不保留到历史列表）
+async function clearCurrentConversation() {
+  // 如果有对话 ID，先归档（这样不会出现在默认历史列表中）
+  if (conversationId.value) {
+    try {
+      await archiveConversation(props.projectId, conversationId.value)
+    } catch (error) {
+      console.error('归档对话失败:', error)
+      // 即使归档失败，也继续清除本地状态
+    }
+  }
+
+  // 清除本地状态
+  messages.value = []
+  conversationId.value = null
+  streamingContent.value = ''
+  showHistoryPanel.value = false
   localStorage.removeItem(getStorageKey())
 }
 

@@ -33,7 +33,7 @@
             <button
               v-if="!isAdmin"
               class="px-3 py-2 text-sm font-medium text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded-lg transition-all duration-200 flex items-center gap-2"
-              @click="showGMAgentPanel = true"
+              @click="gmPanelStore.openPanel()"
               title="AI 助手"
             >
               <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
@@ -170,19 +170,7 @@
         </div>
       </div>
 
-      <!-- AI 助手面板 - 右侧固定栏（从顶部开始） -->
-      <aside
-        v-if="!isAdmin"
-        class="fixed right-0 top-0 bottom-0 z-30 w-[520px] bg-white border-l border-slate-200/60 transform transition-transform duration-300 ease-out"
-        :class="showGMAgentPanel ? 'translate-x-0' : 'translate-x-full'"
-      >
-        <GMAgentPanel
-          v-if="showGMAgentPanel"
-          :project-id="projectId"
-          @close="showGMAgentPanel = false"
-          @refresh="reloadSection(activeSection, true)"
-        />
-      </aside>
+      <!-- AI 助手面板已移至 App.vue 全局管理 -->
     </div>
 
     <!-- Blueprint Edit Modal -->
@@ -259,6 +247,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, h } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useNovelStore } from '@/stores/novel'
+import { useGMPanelStore } from '@/stores/gmPanel'
 import { NovelAPI } from '@/api/novel'
 import { AdminAPI } from '@/api/admin'
 import type { NovelProject, NovelSectionResponse, NovelSectionType } from '@/api/novel'
@@ -269,7 +258,6 @@ import CharactersSection from '@/components/novel-detail/CharactersSection.vue'
 import RelationshipsSection from '@/components/novel-detail/RelationshipsSection.vue'
 import ChapterOutlineSection from '@/components/novel-detail/ChapterOutlineSection.vue'
 import ChaptersSection from '@/components/novel-detail/ChaptersSection.vue'
-import GMAgentPanel from '@/components/GMAgentPanel.vue'
 
 interface Props {
   isAdmin?: boolean
@@ -284,6 +272,7 @@ const props = withDefaults(defineProps<Props>(), {
 const route = useRoute()
 const router = useRouter()
 const novelStore = useNovelStore()
+const gmPanelStore = useGMPanelStore()
 
 const projectId = route.params.id as string
 const isSidebarOpen = ref(typeof window !== 'undefined' ? window.innerWidth >= 1024 : true)
@@ -380,7 +369,9 @@ const isAddChapterModalOpen = ref(false)
 const newChapterTitle = ref('')
 const newChapterSummary = ref('')
 const originalBodyOverflow = ref('')
-const showGMAgentPanel = ref(false)
+
+// 使用 store 管理 GM 面板状态
+const showGMAgentPanel = computed(() => gmPanelStore.isPanelOpen)
 
 const novel = computed(() => !props.isAdmin ? novelStore.currentProject as NovelProject | null : null)
 
@@ -590,6 +581,11 @@ onMounted(async () => {
   if (typeof document !== 'undefined') {
     originalBodyOverflow.value = document.body.style.overflow
     document.body.style.overflow = 'hidden'
+  }
+
+  // 设置当前项目 ID 以恢复 GM 面板状态
+  if (!props.isAdmin) {
+    gmPanelStore.setActiveProject(projectId)
   }
 
   // 只加载必要的 section 数据，不预加载完整项目

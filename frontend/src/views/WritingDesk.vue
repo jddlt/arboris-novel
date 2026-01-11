@@ -85,19 +85,7 @@
       </div>
     </div>
 
-    <!-- AI 助手面板 - 右侧固定栏（从顶部开始） -->
-    <aside
-      v-if="project"
-      class="fixed right-0 top-0 bottom-0 z-30 w-[520px] bg-white border-l border-slate-200/60 transform transition-transform duration-300 ease-out"
-      :class="showGMAgentPanel ? 'translate-x-0' : 'translate-x-full'"
-    >
-      <GMAgentPanel
-        v-if="showGMAgentPanel"
-        :project-id="project.id"
-        @close="showGMAgentPanel = false"
-        @refresh="loadProject"
-      />
-    </aside>
+    <!-- AI 助手面板已移至 App.vue 全局管理 -->
     <WDVersionDetailModal
       :show="showVersionDetailModal"
       :detail-version-index="detailVersionIndex"
@@ -126,9 +114,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useNovelStore } from '@/stores/novel'
+import { useGMPanelStore } from '@/stores/gmPanel'
 import type { Chapter, ChapterOutline, ChapterGenerationResponse, ChapterVersion } from '@/api/novel'
 import { globalAlert } from '@/composables/useAlert'
 import Tooltip from '@/components/Tooltip.vue'
@@ -139,7 +128,6 @@ import WDVersionDetailModal from '@/components/writing-desk/WDVersionDetailModal
 import WDEvaluationDetailModal from '@/components/writing-desk/WDEvaluationDetailModal.vue'
 import WDEditChapterModal from '@/components/writing-desk/WDEditChapterModal.vue'
 import WDGenerateOutlineModal from '@/components/writing-desk/WDGenerateOutlineModal.vue'
-import GMAgentPanel from '@/components/GMAgentPanel.vue'
 
 interface Props {
   id: string
@@ -148,6 +136,7 @@ interface Props {
 const props = defineProps<Props>()
 const router = useRouter()
 const novelStore = useNovelStore()
+const gmPanelStore = useGMPanelStore()
 
 // 状态管理
 const selectedChapterNumber = ref<number | null>(null)
@@ -162,7 +151,9 @@ const showEditChapterModal = ref(false)
 const editingChapter = ref<ChapterOutline | null>(null)
 const isGeneratingOutline = ref(false)
 const showGenerateOutlineModal = ref(false)
-const showGMAgentPanel = ref(false)
+
+// 使用 store 管理 GM 面板状态
+const showGMAgentPanel = computed(() => gmPanelStore.isPanelOpen)
 
 // 计算属性
 const project = computed(() => novelStore.currentProject)
@@ -347,7 +338,7 @@ const toggleSidebar = () => {
 }
 
 const toggleGMAgentPanel = () => {
-  showGMAgentPanel.value = !showGMAgentPanel.value
+  gmPanelStore.togglePanel()
 }
 
 const closeSidebar = () => {
@@ -608,6 +599,8 @@ const handleGenerateOutline = async (numChapters: number) => {
 }
 
 onMounted(() => {
+  // 设置当前项目 ID 以恢复 GM 面板状态
+  gmPanelStore.setActiveProject(props.id)
   loadProject()
 })
 </script>
