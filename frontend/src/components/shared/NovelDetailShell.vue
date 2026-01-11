@@ -1,8 +1,11 @@
 <template>
   <div class="h-screen flex flex-col overflow-hidden bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/40">
     <!-- Header -->
-    <header class="sticky top-0 z-40 bg-white/90 backdrop-blur-lg border-b border-slate-200/60 shadow-sm">
-      <div class="max-w-[1800px] mx-auto px-4 sm:px-6 lg:px-8 py-4">
+    <header
+      class="sticky top-0 z-40 bg-white/90 backdrop-blur-lg border-b border-slate-200/60 shadow-sm transition-all duration-300"
+      :class="showGMAgentPanel && !isAdmin ? 'lg:mr-[520px]' : ''"
+    >
+      <div class="px-4 sm:px-6 lg:px-8 py-4">
         <div class="flex items-center justify-between">
           <!-- Left: Title & Info -->
           <div class="flex items-center gap-3 flex-1 min-w-0">
@@ -28,6 +31,17 @@
           <!-- Right: Actions -->
           <div class="flex items-center gap-2 flex-shrink-0">
             <button
+              v-if="!isAdmin"
+              class="px-3 py-2 text-sm font-medium text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded-lg transition-all duration-200 flex items-center gap-2"
+              @click="showGMAgentPanel = true"
+              title="AI 助手"
+            >
+              <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M10 2a6 6 0 00-6 6v3.586l-.707.707A1 1 0 004 14h12a1 1 0 00.707-1.707L16 11.586V8a6 6 0 00-6-6zm0 16a3 3 0 01-3-3h6a3 3 0 01-3 3z"/>
+              </svg>
+              <span class="hidden sm:inline">AI 助手</span>
+            </button>
+            <button
               class="px-3 py-2 sm:px-4 text-sm font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg transition-all duration-200 hover:shadow-md"
               @click="goBack"
             >
@@ -48,7 +62,7 @@
     </header>
 
     <!-- Main Content -->
-    <div class="flex max-w-[1800px] mx-auto w-full flex-1 min-h-0 overflow-hidden">
+    <div class="flex w-full flex-1 min-h-0 overflow-hidden">
       <!-- Sidebar -->
       <aside
         class="fixed left-0 top-[73px] bottom-0 z-30 w-72 bg-white/95 backdrop-blur-lg border-r border-slate-200/60 shadow-2xl transform transition-transform duration-300 ease-out lg:translate-x-0"
@@ -109,7 +123,10 @@
       </transition>
 
       <!-- Main Content Area -->
-      <div class="flex-1 lg:ml-72 min-h-0 flex flex-col h-full">
+      <div
+        class="flex-1 lg:ml-72 min-h-0 flex flex-col h-full transition-all duration-300"
+        :class="showGMAgentPanel && !isAdmin ? 'lg:mr-[520px]' : ''"
+      >
         <div class="flex-1 min-h-0 h-full px-4 sm:px-6 lg:px-8 xl:px-12 py-6 sm:py-8 flex flex-col overflow-hidden box-border">
           <div class="flex-1 flex flex-col min-h-0 h-full">
             <!-- Content Card -->
@@ -152,6 +169,20 @@
           </div>
         </div>
       </div>
+
+      <!-- AI 助手面板 - 右侧固定栏（从顶部开始） -->
+      <aside
+        v-if="!isAdmin"
+        class="fixed right-0 top-0 bottom-0 z-30 w-[520px] bg-white border-l border-slate-200/60 transform transition-transform duration-300 ease-out"
+        :class="showGMAgentPanel ? 'translate-x-0' : 'translate-x-full'"
+      >
+        <GMAgentPanel
+          v-if="showGMAgentPanel"
+          :project-id="projectId"
+          @close="showGMAgentPanel = false"
+          @refresh="reloadSection(activeSection, true)"
+        />
+      </aside>
     </div>
 
     <!-- Blueprint Edit Modal -->
@@ -238,6 +269,7 @@ import CharactersSection from '@/components/novel-detail/CharactersSection.vue'
 import RelationshipsSection from '@/components/novel-detail/RelationshipsSection.vue'
 import ChapterOutlineSection from '@/components/novel-detail/ChapterOutlineSection.vue'
 import ChaptersSection from '@/components/novel-detail/ChaptersSection.vue'
+import GMAgentPanel from '@/components/GMAgentPanel.vue'
 
 interface Props {
   isAdmin?: boolean
@@ -348,6 +380,7 @@ const isAddChapterModalOpen = ref(false)
 const newChapterTitle = ref('')
 const newChapterSummary = ref('')
 const originalBodyOverflow = ref('')
+const showGMAgentPanel = ref(false)
 
 const novel = computed(() => !props.isAdmin ? novelStore.currentProject as NovelProject | null : null)
 

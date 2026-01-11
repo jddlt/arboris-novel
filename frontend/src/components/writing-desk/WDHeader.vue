@@ -1,5 +1,8 @@
 <template>
-  <div class="flex-shrink-0 z-30 bg-white/80 backdrop-blur-lg border-b border-gray-200 shadow-sm">
+  <div
+    class="flex-shrink-0 z-30 bg-white/80 backdrop-blur-lg border-b border-gray-200 shadow-sm transition-all duration-300"
+    :class="showGMAgentPanel ? 'lg:mr-[520px]' : ''"
+  >
     <div class="px-4 sm:px-6 lg:px-8">
       <div class="flex items-center justify-between h-16">
         <!-- 左侧：项目信息 -->
@@ -26,6 +29,17 @@
 
         <!-- 右侧：操作按钮 -->
         <div class="flex items-center gap-1 sm:gap-2">
+          <button
+            @click="$emit('toggleGMAgent')"
+            class="p-2 sm:px-3 sm:py-2 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded-lg transition-colors flex items-center gap-2"
+            title="AI 助手"
+          >
+            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M10 2a6 6 0 00-6 6v3.586l-.707.707A1 1 0 004 14h12a1 1 0 00.707-1.707L16 11.586V8a6 6 0 00-6-6zm0 16a3 3 0 01-3-3h6a3 3 0 01-3 3z"/>
+            </svg>
+            <span class="hidden md:inline text-sm font-medium">AI 助手</span>
+          </button>
+          <div class="w-px h-6 bg-gray-300 hidden sm:block"></div>
           <button
             @click="$emit('viewProjectDetail')"
             class="p-2 sm:px-3 sm:py-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors flex items-center gap-2"
@@ -78,9 +92,10 @@ interface Props {
   progress: number
   completedChapters: number
   totalChapters: number
+  showGMAgentPanel?: boolean
 }
 
 defineProps<Props>()
 
-defineEmits(['goBack', 'viewProjectDetail', 'toggleSidebar'])
+defineEmits(['goBack', 'viewProjectDetail', 'toggleSidebar', 'toggleGMAgent'])
 </script>

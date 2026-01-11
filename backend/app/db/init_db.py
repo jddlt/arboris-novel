@@ -48,10 +48,9 @@ async def init_db() -> None:
                 logger.exception("默认管理员创建失败，可能是并发启动导致，请检查数据库状态")
 
         # ---- 第三步：同步系统配置到数据库 ----
+        # 所有配置项都写入数据库，即使值为空，让用户在界面上能看到所有可配置项
         for entry in SYSTEM_CONFIG_DEFAULTS:
-            value = entry.value_getter(settings)
-            if value is None:
-                continue
+            value = entry.value_getter(settings) or ""
             existing = await session.get(SystemConfig, entry.key)
             if existing:
                 if entry.description and existing.description != entry.description:

@@ -5,13 +5,18 @@
       :progress="progress"
       :completed-chapters="completedChapters"
       :total-chapters="totalChapters"
+      :show-g-m-agent-panel="showGMAgentPanel"
       @go-back="goBack"
       @view-project-detail="viewProjectDetail"
       @toggle-sidebar="toggleSidebar"
+      @toggle-g-m-agent="toggleGMAgentPanel"
     />
 
     <!-- 主要内容区域 -->
-    <div class="flex-1 w-full px-4 sm:px-6 lg:px-8 py-6 overflow-hidden">
+    <div
+      class="flex-1 px-4 sm:px-6 lg:px-8 py-6 overflow-hidden transition-all duration-300"
+      :class="showGMAgentPanel ? 'lg:mr-[520px]' : ''"
+    >
       <!-- 加载状态 -->
       <div v-if="novelStore.isLoading" class="h-full flex justify-center items-center">
         <div class="text-center">
@@ -79,6 +84,20 @@
         </div>
       </div>
     </div>
+
+    <!-- AI 助手面板 - 右侧固定栏（从顶部开始） -->
+    <aside
+      v-if="project"
+      class="fixed right-0 top-0 bottom-0 z-30 w-[520px] bg-white border-l border-slate-200/60 transform transition-transform duration-300 ease-out"
+      :class="showGMAgentPanel ? 'translate-x-0' : 'translate-x-full'"
+    >
+      <GMAgentPanel
+        v-if="showGMAgentPanel"
+        :project-id="project.id"
+        @close="showGMAgentPanel = false"
+        @refresh="loadProject"
+      />
+    </aside>
     <WDVersionDetailModal
       :show="showVersionDetailModal"
       :detail-version-index="detailVersionIndex"
@@ -120,6 +139,7 @@ import WDVersionDetailModal from '@/components/writing-desk/WDVersionDetailModal
 import WDEvaluationDetailModal from '@/components/writing-desk/WDEvaluationDetailModal.vue'
 import WDEditChapterModal from '@/components/writing-desk/WDEditChapterModal.vue'
 import WDGenerateOutlineModal from '@/components/writing-desk/WDGenerateOutlineModal.vue'
+import GMAgentPanel from '@/components/GMAgentPanel.vue'
 
 interface Props {
   id: string
@@ -142,6 +162,7 @@ const showEditChapterModal = ref(false)
 const editingChapter = ref<ChapterOutline | null>(null)
 const isGeneratingOutline = ref(false)
 const showGenerateOutlineModal = ref(false)
+const showGMAgentPanel = ref(false)
 
 // 计算属性
 const project = computed(() => novelStore.currentProject)
@@ -323,6 +344,10 @@ const viewProjectDetail = () => {
 
 const toggleSidebar = () => {
   sidebarOpen.value = !sidebarOpen.value
+}
+
+const toggleGMAgentPanel = () => {
+  showGMAgentPanel.value = !showGMAgentPanel.value
 }
 
 const closeSidebar = () => {

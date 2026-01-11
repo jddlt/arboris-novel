@@ -3,7 +3,7 @@ import router from '@/router'
 
 // API 配置
 // 在生产环境中使用相对路径，在开发环境中使用绝对路径
-export const API_BASE_URL = import.meta.env.MODE === 'production' ? '' : 'http://127.0.0.1:8000'
+export const API_BASE_URL = import.meta.env.MODE === 'production' ? '' : 'http://127.0.0.1:8002'
 export const API_PREFIX = '/api'
 
 // 统一的请求处理函数

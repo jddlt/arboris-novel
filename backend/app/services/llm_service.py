@@ -188,6 +188,264 @@ class LLMService:
         )
         return full_response
 
+    async def chat_with_tools(
+        self,
+        system_prompt: str,
+        messages: List[Dict[str, str]],
+        tools: List[Dict],
+        *,
+        temperature: float = 0.7,
+        user_id: Optional[int] = None,
+        timeout: float = 300.0,
+        enable_web_search: bool = False,
+    ) -> Dict[str, Any]:
+        """带工具调用的 LLM 对话。
+
+        用于 GM Agent 等需要 Function Calling 的场景。
+        不使用流式响应，直接返回完整结果。
+
+        Args:
+            system_prompt: 系统提示词
+            messages: 对话历史
+            tools: 工具定义列表（OpenAI Function Calling 格式）
+            temperature: 温度参数
+            user_id: 用户 ID（用于配额控制）
+            timeout: 超时时间（秒）
+            enable_web_search: 是否启用联网搜索（仅 Gemini 模型支持）
+
+        Returns:
+            包含 content 和 tool_calls 的字典
+        """
+        config = await self._resolve_llm_config(user_id)
+
+        from openai import AsyncOpenAI
+
+        client = AsyncOpenAI(
+            api_key=config["api_key"],
+            base_url=config.get("base_url"),
+        )
+
+        # 构建消息
+        full_messages = [{"role": "system", "content": system_prompt}]
+        full_messages.extend(messages)
+
+        # 构建工具列表
+        final_tools = list(tools) if tools else []
+
+        # 如果启用联网搜索且是 Gemini 模型，添加 google_search 工具
+        model_name = (config.get("model") or "").lower()
+        if enable_web_search and "gemini" in model_name:
+            final_tools.append({"google_search": {}})
+            logger.info("已启用 Gemini 联网搜索")
+
+        logger.info(
+            "LLM chat_with_tools: model=%s user_id=%s messages=%d tools=%d web_search=%s",
+            config.get("model"),
+            user_id,
+            len(full_messages),
+            len(final_tools),
+            enable_web_search and "gemini" in model_name,
+        )
+
+        try:
+            response = await client.chat.completions.create(
+                model=config.get("model") or "gpt-4",
+                messages=full_messages,
+                tools=final_tools if final_tools else None,
+                tool_choice="auto" if final_tools else None,
+                temperature=temperature,
+                timeout=int(timeout),
+            )
+        except Exception as exc:
+            logger.error(
+                "LLM chat_with_tools failed: model=%s user_id=%s error=%s",
+                config.get("model"),
+                user_id,
+                exc,
+                exc_info=True,
+            )
+            raise
+
+        # 解析响应
+        choice = response.choices[0] if response.choices else None
+        if not choice:
+            logger.warning("LLM 返回空响应")
+            return {"content": "", "tool_calls": []}
+
+        content = choice.message.content or ""
+        tool_calls = []
+
+        if choice.message.tool_calls:
+            for tc in choice.message.tool_calls:
+                tool_calls.append({
+                    "id": tc.id,
+                    "name": tc.function.name,
+                    "arguments": tc.function.arguments,
+                })
+
+        await self.usage_service.increment("api_request_count")
+        logger.info(
+            "LLM chat_with_tools success: model=%s user_id=%s content_len=%d tool_calls=%d",
+            config.get("model"),
+            user_id,
+            len(content),
+            len(tool_calls),
+        )
+
+        return {
+            "content": content,
+            "tool_calls": tool_calls,
+        }
+
+    async def stream_chat_with_tools(
+        self,
+        system_prompt: str,
+        messages: List[Dict[str, str]],
+        tools: List[Dict],
+        *,
+        temperature: float = 0.7,
+        user_id: Optional[int] = None,
+        timeout: float = 300.0,
+        enable_web_search: bool = False,
+    ):
+        """带工具调用的流式 LLM 对话。
+
+        用于 GM Agent 需要流式输出的场景。
+        逐步 yield 内容片段，最后 yield 完整的工具调用。
+
+        Args:
+            system_prompt: 系统提示词
+            messages: 对话历史
+            tools: 工具定义列表（OpenAI Function Calling 格式）
+            temperature: 温度参数
+            user_id: 用户 ID（用于配额控制）
+            timeout: 超时时间（秒）
+            enable_web_search: 是否启用联网搜索（仅 Gemini 模型支持）
+
+        Yields:
+            dict: {"type": "content", "content": "..."} 或
+                  {"type": "tool_calls", "tool_calls": [...]} 或
+                  {"type": "done", "content": "...", "tool_calls": [...]}
+        """
+        config = await self._resolve_llm_config(user_id)
+
+        from openai import AsyncOpenAI
+
+        client = AsyncOpenAI(
+            api_key=config["api_key"],
+            base_url=config.get("base_url"),
+        )
+
+        # 构建消息
+        full_messages = [{"role": "system", "content": system_prompt}]
+        full_messages.extend(messages)
+
+        # 构建工具列表
+        final_tools = list(tools) if tools else []
+
+        # 如果启用联网搜索且是 Gemini 模型，添加 google_search 工具
+        model_name = (config.get("model") or "").lower()
+        if enable_web_search and "gemini" in model_name:
+            final_tools.append({"google_search": {}})
+            logger.info("已启用 Gemini 联网搜索（流式）")
+
+        logger.info(
+            "LLM stream_chat_with_tools: model=%s user_id=%s messages=%d tools=%d web_search=%s",
+            config.get("model"),
+            user_id,
+            len(full_messages),
+            len(final_tools),
+            enable_web_search and "gemini" in model_name,
+        )
+
+        try:
+            stream = await client.chat.completions.create(
+                model=config.get("model") or "gpt-4",
+                messages=full_messages,
+                tools=final_tools if final_tools else None,
+                tool_choice="auto" if final_tools else None,
+                temperature=temperature,
+                timeout=int(timeout),
+                stream=True,
+            )
+        except Exception as exc:
+            logger.error(
+                "LLM stream_chat_with_tools failed to start: model=%s user_id=%s error=%s",
+                config.get("model"),
+                user_id,
+                exc,
+                exc_info=True,
+            )
+            raise
+
+        full_content = ""
+        tool_calls_data: Dict[int, Dict[str, Any]] = {}  # index -> {id, name, arguments}
+
+        try:
+            async for chunk in stream:
+                if not chunk.choices:
+                    continue
+
+                delta = chunk.choices[0].delta
+
+                # 处理文本内容
+                if delta.content:
+                    full_content += delta.content
+                    yield {"type": "content", "content": delta.content}
+
+                # 处理工具调用
+                if delta.tool_calls:
+                    for tc in delta.tool_calls:
+                        idx = tc.index
+                        if idx not in tool_calls_data:
+                            tool_calls_data[idx] = {
+                                "id": tc.id or "",
+                                "name": tc.function.name if tc.function and tc.function.name else "",
+                                "arguments": "",
+                            }
+                        else:
+                            if tc.id:
+                                tool_calls_data[idx]["id"] = tc.id
+                            if tc.function and tc.function.name:
+                                tool_calls_data[idx]["name"] = tc.function.name
+
+                        if tc.function and tc.function.arguments:
+                            tool_calls_data[idx]["arguments"] += tc.function.arguments
+
+        except Exception as exc:
+            logger.error(
+                "LLM stream_chat_with_tools stream error: model=%s user_id=%s error=%s",
+                config.get("model"),
+                user_id,
+                exc,
+                exc_info=True,
+            )
+            raise
+
+        # 整理工具调用结果
+        tool_calls = []
+        for idx in sorted(tool_calls_data.keys()):
+            tc_data = tool_calls_data[idx]
+            if tc_data["name"]:  # 只添加有名称的工具调用
+                tool_calls.append(tc_data)
+
+        await self.usage_service.increment("api_request_count")
+
+        logger.info(
+            "LLM stream_chat_with_tools complete: model=%s user_id=%s content_len=%d tool_calls=%d",
+            config.get("model"),
+            user_id,
+            len(full_content),
+            len(tool_calls),
+        )
+
+        # 最终 yield 完整结果
+        yield {
+            "type": "done",
+            "content": full_content,
+            "tool_calls": tool_calls,
+        }
+
     async def _resolve_llm_config(self, user_id: Optional[int]) -> Dict[str, Optional[str]]:
         if user_id:
             config = await self.llm_repo.get_by_user(user_id)

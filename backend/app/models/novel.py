@@ -58,6 +58,12 @@ class NovelProject(Base):
     chapters: Mapped[list["Chapter"]] = relationship(
         back_populates="project", cascade="all, delete-orphan", order_by="Chapter.chapter_number"
     )
+    gm_conversations: Mapped[list["GMConversation"]] = relationship(
+        "GMConversation",
+        back_populates="project",
+        cascade="all, delete-orphan",
+        order_by="GMConversation.updated_at.desc()",
+    )
 
 
 class NovelConversation(Base):

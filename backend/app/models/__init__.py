@@ -1,6 +1,7 @@
 """集中导出 ORM 模型，确保 SQLAlchemy 元数据在初始化时被正确加载。"""
 
 from .admin_setting import AdminSetting
+from .gm import GMActionHistory, GMConversation, GMPendingAction
 from .llm_config import LLMConfig
 from .novel import (
     BlueprintCharacter,
@@ -22,6 +23,9 @@ from .system_config import SystemConfig
 
 __all__ = [
     "AdminSetting",
+    "GMActionHistory",
+    "GMConversation",
+    "GMPendingAction",
     "LLMConfig",
     "NovelConversation",
     "NovelBlueprint",

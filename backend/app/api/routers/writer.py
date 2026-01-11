@@ -180,6 +180,16 @@ async def generate_chapter(
     rag_summaries_text = "\n".join(rag_context.summary_lines()) if rag_context.summaries else "未检索到章节摘要"
     writing_notes = request.writing_notes or "无额外写作指令"
 
+    # 收集后续章节的大纲预览（下一章 + 后续2章），帮助 AI 控制节奏、避免写过头
+    upcoming_outlines = []
+    for future_num in range(request.chapter_number + 1, request.chapter_number + 4):
+        future_outline = outlines_map.get(future_num)
+        if future_outline:
+            upcoming_outlines.append(
+                f"- 第{future_num}章 - {future_outline.title or '未命名'}：{future_outline.summary or '暂无摘要'}"
+            )
+    upcoming_section = "\n".join(upcoming_outlines) if upcoming_outlines else "无后续章节大纲"
+
     prompt_sections = [
         ("[世界蓝图](JSON)", blueprint_text),
         # ("[前情摘要]", completed_section),
@@ -191,15 +201,24 @@ async def generate_chapter(
             "[当前章节目标]",
             f"标题：{outline_title}\n摘要：{outline_summary}\n写作要求：{writing_notes}",
         ),
+        (
+            "[后续章节预览](请勿在本章写入这些内容，仅作参考)",
+            upcoming_section,
+        ),
     ]
     prompt_input = "\n\n".join(f"{title}\n{content}" for title, content in prompt_sections if content)
     logger.debug("章节写作提示词：%s\n%s", writer_prompt, prompt_input)
+
+    # 不同版本使用不同temperature增加多样性：保守→平衡→创意
+    VERSION_TEMPERATURES = [0.7, 0.85, 1.0]
+
     async def _generate_single_version(idx: int) -> Dict:
+        version_temp = VERSION_TEMPERATURES[idx % len(VERSION_TEMPERATURES)]
         try:
             response = await llm_service.get_llm_response(
                 system_prompt=writer_prompt,
                 conversation_history=[{"role": "user", "content": prompt_input}],
-                temperature=0.9,
+                temperature=version_temp,
                 user_id=current_user.id,
                 timeout=600.0,
             )
@@ -232,11 +251,13 @@ async def generate_chapter(
             )
 
     version_count = await _resolve_version_count(session)
+    temps_preview = [VERSION_TEMPERATURES[i % len(VERSION_TEMPERATURES)] for i in range(version_count)]
     logger.info(
-        "项目 %s 第 %s 章计划生成 %s 个版本",
+        "项目 %s 第 %s 章计划生成 %s 个版本，temperature梯度: %s",
         project_id,
         request.chapter_number,
         version_count,
+        temps_preview,
     )
     raw_versions = []
     for idx in range(version_count):
