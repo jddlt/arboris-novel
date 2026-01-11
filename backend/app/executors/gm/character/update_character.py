@@ -78,6 +78,31 @@ class UpdateCharacterExecutor(BaseToolExecutor):
         return f"修改角色：{name}"
 
     async def validate_params(self, params: Dict[str, Any]) -> Optional[str]:
+        # 参数别名标准化：character_id/角色名/原名 -> name（用于定位角色）
+        if "character_id" in params and "name" not in params:
+            params["name"] = params.pop("character_id")
+        if "角色名" in params and "name" not in params:
+            params["name"] = params.pop("角色名")
+        if "原名" in params and "name" not in params:
+            params["name"] = params.pop("原名")
+        # 名称/新名称 -> new_name（用于改名）
+        if "名称" in params and "new_name" not in params:
+            params["new_name"] = params.pop("名称")
+        if "新名称" in params and "new_name" not in params:
+            params["new_name"] = params.pop("新名称")
+        # role_type/身份 -> identity
+        if "role_type" in params and "identity" not in params:
+            params["identity"] = params.pop("role_type")
+        if "身份" in params and "identity" not in params:
+            params["identity"] = params.pop("身份")
+        # 描述相关字段
+        if "性格描述" in params and "personality" not in params:
+            params["personality"] = params.pop("性格描述")
+        if "目标" in params and "goals" not in params:
+            params["goals"] = params.pop("目标")
+        if "能力" in params and "abilities" not in params:
+            params["abilities"] = params.pop("能力")
+
         name = params.get("name")
         if not name or not name.strip():
             return "必须指定要修改的角色名称"
@@ -143,9 +168,16 @@ class UpdateCharacterExecutor(BaseToolExecutor):
         if "relationship_to_protagonist" in params:
             character.relationship_to_protagonist = params["relationship_to_protagonist"]
         if "extra" in params:
-            # 合并 extra 字段
+            # 合并 extra 字段 - 确保是 dict 而不是 JSON 字符串
+            extra_value = params["extra"]
+            if isinstance(extra_value, str):
+                import json
+                try:
+                    extra_value = json.loads(extra_value)
+                except json.JSONDecodeError:
+                    extra_value = {}
             current_extra = character.extra or {}
-            current_extra.update(params["extra"])
+            current_extra.update(extra_value)
             character.extra = current_extra
 
         await self.session.flush()

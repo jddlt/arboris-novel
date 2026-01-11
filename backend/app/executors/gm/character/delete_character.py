@@ -47,6 +47,14 @@ class DeleteCharacterExecutor(BaseToolExecutor):
         return f"删除角色：{name}（将同时删除相关关系）"
 
     async def validate_params(self, params: Dict[str, Any]) -> Optional[str]:
+        # 参数别名标准化：character_id/角色名/姓名 -> name
+        if "character_id" in params and "name" not in params:
+            params["name"] = params.pop("character_id")
+        if "角色名" in params and "name" not in params:
+            params["name"] = params.pop("角色名")
+        if "姓名" in params and "name" not in params:
+            params["name"] = params.pop("姓名")
+
         name = params.get("name")
         if not name or not name.strip():
             return "必须指定要删除的角色名称"

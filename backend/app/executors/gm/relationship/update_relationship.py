@@ -57,6 +57,20 @@ class UpdateRelationshipExecutor(BaseToolExecutor):
         return f"修改关系：{from_char} → {to_char}（{desc}）"
 
     async def validate_params(self, params: Dict[str, Any]) -> Optional[str]:
+        # 参数别名标准化
+        if "from" in params and "character_from" not in params:
+            params["character_from"] = params.pop("from")
+        if "to" in params and "character_to" not in params:
+            params["character_to"] = params.pop("to")
+        if "from_character" in params and "character_from" not in params:
+            params["character_from"] = params.pop("from_character")
+        if "to_character" in params and "character_to" not in params:
+            params["character_to"] = params.pop("to_character")
+        if "关系描述" in params and "description" not in params:
+            params["description"] = params.pop("关系描述")
+        if "new_description" in params and "description" not in params:
+            params["description"] = params.pop("new_description")
+
         char_from = params.get("character_from")
         char_to = params.get("character_to")
         desc = params.get("description")

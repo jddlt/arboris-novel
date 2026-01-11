@@ -181,8 +181,17 @@ class UpdateBlueprintExecutor(BaseToolExecutor):
 
         # 处理世界观设定
         if "world_setting" in params:
-            # 整体替换
-            blueprint.world_setting = params["world_setting"]
+            # 整体替换 - 确保 world_setting 是 dict 而不是 JSON 字符串
+            world_setting_value = params["world_setting"]
+            if isinstance(world_setting_value, str):
+                try:
+                    world_setting_value = json.loads(world_setting_value)
+                except json.JSONDecodeError:
+                    return ToolResult(
+                        success=False,
+                        message="world_setting 格式错误，必须是有效的 JSON 对象",
+                    )
+            blueprint.world_setting = world_setting_value
             flag_modified(blueprint, "world_setting")
             updated_fields.append("world_setting")
         elif "world_setting_patch" in params:

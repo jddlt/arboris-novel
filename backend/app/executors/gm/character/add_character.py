@@ -73,6 +73,16 @@ class AddCharacterExecutor(BaseToolExecutor):
         return f"添加角色：{name}{identity_str}"
 
     async def validate_params(self, params: Dict[str, Any]) -> Optional[str]:
+        # 参数别名标准化
+        if "角色名" in params and "name" not in params:
+            params["name"] = params.pop("角色名")
+        if "姓名" in params and "name" not in params:
+            params["name"] = params.pop("姓名")
+        if "role_type" in params and "identity" not in params:
+            params["identity"] = params.pop("role_type")
+        if "身份" in params and "identity" not in params:
+            params["identity"] = params.pop("身份")
+
         name = params.get("name")
         if not name or not name.strip():
             return "角色名称不能为空"

@@ -538,6 +538,13 @@ class NovelService:
     def _build_blueprint_schema(self, project: NovelProject) -> Blueprint:
         blueprint_obj = project.blueprint
         if blueprint_obj:
+            # 处理 world_setting - 可能是 dict 或 JSON 字符串
+            world_setting = blueprint_obj.world_setting or {}
+            if isinstance(world_setting, str):
+                try:
+                    world_setting = json.loads(world_setting)
+                except json.JSONDecodeError:
+                    world_setting = {}
             return Blueprint(
                 title=blueprint_obj.title or "",
                 target_audience=blueprint_obj.target_audience or "",
@@ -546,7 +553,7 @@ class NovelService:
                 tone=blueprint_obj.tone or "",
                 one_sentence_summary=blueprint_obj.one_sentence_summary or "",
                 full_synopsis=blueprint_obj.full_synopsis or "",
-                world_setting=blueprint_obj.world_setting or {},
+                world_setting=world_setting,
                 characters=[
                     {
                         "name": character.name,

@@ -52,6 +52,16 @@ class DeleteRelationshipExecutor(BaseToolExecutor):
         return f"删除关系：{from_char} → {to_char}"
 
     async def validate_params(self, params: Dict[str, Any]) -> Optional[str]:
+        # 参数别名标准化
+        if "from" in params and "character_from" not in params:
+            params["character_from"] = params.pop("from")
+        if "to" in params and "character_to" not in params:
+            params["character_to"] = params.pop("to")
+        if "from_character" in params and "character_from" not in params:
+            params["character_from"] = params.pop("from_character")
+        if "to_character" in params and "character_to" not in params:
+            params["character_to"] = params.pop("to_character")
+
         char_from = params.get("character_from")
         char_to = params.get("character_to")
 
