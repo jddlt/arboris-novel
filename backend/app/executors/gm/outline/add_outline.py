@@ -69,14 +69,19 @@ class AddOutlineExecutor(BaseToolExecutor):
             return "章节标题过长，最多255个字符"
 
         chapter_number = params.get("chapter_number")
-        if chapter_number is not None and chapter_number < 1:
-            return "章节号必须大于0"
+        if chapter_number is not None:
+            try:
+                chapter_number = int(chapter_number)
+                if chapter_number < 1:
+                    return "章节号必须大于0"
+            except (ValueError, TypeError):
+                return "章节号必须是有效的整数"
         return None
 
     async def execute(self, project_id: str, params: Dict[str, Any]) -> ToolResult:
         title = params["title"].strip()
         summary = params["summary"].strip()
-        chapter_number = params.get("chapter_number")
+        chapter_number = int(params["chapter_number"]) if params.get("chapter_number") is not None else None
 
         # 如果没有指定章节号，获取当前最大章节号
         if chapter_number is None:

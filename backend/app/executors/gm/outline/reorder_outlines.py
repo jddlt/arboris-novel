@@ -59,6 +59,13 @@ class ReorderOutlinesExecutor(BaseToolExecutor):
             return "必须指定要移动的章节号"
         if to_chapter is None:
             return "必须指定目标位置"
+
+        try:
+            from_chapter = int(from_chapter)
+            to_chapter = int(to_chapter)
+        except (ValueError, TypeError):
+            return "章节号必须是有效的整数"
+
         if from_chapter < 1 or to_chapter < 1:
             return "章节号必须大于0"
         if from_chapter == to_chapter:
@@ -66,8 +73,8 @@ class ReorderOutlinesExecutor(BaseToolExecutor):
         return None
 
     async def execute(self, project_id: str, params: Dict[str, Any]) -> ToolResult:
-        from_chapter = params["from_chapter"]
-        to_chapter = params["to_chapter"]
+        from_chapter = int(params["from_chapter"])
+        to_chapter = int(params["to_chapter"])
 
         # 检查源章节是否存在
         from_stmt = select(ChapterOutline).where(

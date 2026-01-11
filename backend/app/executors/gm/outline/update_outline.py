@@ -61,8 +61,12 @@ class UpdateOutlineExecutor(BaseToolExecutor):
         chapter_number = params.get("chapter_number")
         if chapter_number is None:
             return "必须指定章节号"
-        if chapter_number < 1:
-            return "章节号必须大于0"
+        try:
+            chapter_number = int(chapter_number)
+            if chapter_number < 1:
+                return "章节号必须大于0"
+        except (ValueError, TypeError):
+            return "章节号必须是有效的整数"
 
         title = params.get("title")
         summary = params.get("summary")
@@ -74,7 +78,7 @@ class UpdateOutlineExecutor(BaseToolExecutor):
         return None
 
     async def execute(self, project_id: str, params: Dict[str, Any]) -> ToolResult:
-        chapter_number = params["chapter_number"]
+        chapter_number = int(params["chapter_number"])
 
         # 查找大纲
         stmt = select(ChapterOutline).where(
