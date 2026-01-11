@@ -6,9 +6,11 @@ import CustomAlert from '@/components/CustomAlert.vue'
 import GMAgentPanel from '@/components/GMAgentPanel.vue'
 import { globalAlert } from '@/composables/useAlert'
 import { useGMPanelStore } from '@/stores/gmPanel'
+import { useNovelStore } from '@/stores/novel'
 
 const route = useRoute()
 const gmPanelStore = useGMPanelStore()
+const novelStore = useNovelStore()
 
 // 从路由参数中获取项目 ID（支持 /detail/:id 和 /novel/:id）
 const currentProjectId = computed(() => {
@@ -33,6 +35,13 @@ watch(currentProjectId, (newId) => {
 const showGMAgentPanel = computed(() => {
   return isProjectRoute.value && gmPanelStore.isPanelOpen
 })
+
+// 刷新当前项目数据
+async function handleRefresh() {
+  if (currentProjectId.value) {
+    await novelStore.loadProject(currentProjectId.value, true)
+  }
+}
 </script>
 
 <template>
@@ -51,7 +60,7 @@ const showGMAgentPanel = computed(() => {
           v-show="showGMAgentPanel"
           :project-id="currentProjectId"
           @close="gmPanelStore.closePanel()"
-          @refresh="() => {}"
+          @refresh="handleRefresh"
         />
       </aside>
 
