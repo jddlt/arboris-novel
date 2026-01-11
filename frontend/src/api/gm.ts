@@ -249,13 +249,11 @@ export async function getConversations(
   projectId: string,
   includeArchived = false
 ): Promise<ConversationSummary[]> {
-  const url = new URL(
-    `${API_BASE_URL}${API_PREFIX}/novels/${projectId}/gm/conversations`
-  )
+  let url = `${API_BASE_URL}${API_PREFIX}/novels/${projectId}/gm/conversations`
   if (includeArchived) {
-    url.searchParams.set('include_archived', 'true')
+    url += '?include_archived=true'
   }
-  const response = await fetch(url.toString(), {
+  const response = await fetch(url, {
     headers: getAuthHeaders(),
   })
   return handleResponse(response)

@@ -221,7 +221,7 @@ class ContextBuilder:
         completed_chapters = set()
         if project.chapters:
             for ch in project.chapters:
-                if ch.status == "successful" and ch.content:
+                if ch.status == "successful" and ch.selected_version:
                     completed_chapters.add(ch.chapter_number)
 
         lines = ["## 章节大纲（规划）", ""]
