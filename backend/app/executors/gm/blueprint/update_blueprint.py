@@ -13,6 +13,7 @@ import logging
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
 from sqlalchemy import select
+from sqlalchemy.orm.attributes import flag_modified
 
 from ..base import BaseToolExecutor, ToolDefinition, ToolResult
 from ....models.novel import NovelBlueprint
@@ -182,14 +183,16 @@ class UpdateBlueprintExecutor(BaseToolExecutor):
         if "world_setting" in params:
             # 整体替换
             blueprint.world_setting = params["world_setting"]
+            flag_modified(blueprint, "world_setting")
             updated_fields.append("world_setting")
         elif "world_setting_patch" in params:
             # 部分更新（合并）
-            current = blueprint.world_setting or {}
+            current = dict(blueprint.world_setting) if blueprint.world_setting else {}
             patch = params["world_setting_patch"]
             for key, value in patch.items():
                 current[key] = value
             blueprint.world_setting = current
+            flag_modified(blueprint, "world_setting")
             updated_fields.append("world_setting")
 
         await self.session.flush()

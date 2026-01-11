@@ -130,15 +130,17 @@ class GMConversationRepository(BaseRepository[GMConversation]):
         content: str,
         tool_calls: Optional[List[dict]] = None,
         pending_action_ids: Optional[List[str]] = None,
+        tool_call_id: Optional[str] = None,
     ) -> None:
         """追加消息到对话历史。
 
         Args:
             conversation_id: 对话 ID
-            role: 消息角色 (user/assistant)
+            role: 消息角色 (user/assistant/tool)
             content: 消息内容
-            tool_calls: 工具调用列表（可选）
+            tool_calls: 工具调用列表（可选，仅 assistant 消息）
             pending_action_ids: 关联的待执行操作 ID（可选）
+            tool_call_id: 工具调用 ID（可选，仅 tool 消息）
         """
         conversation = await self.get_by_id(conversation_id)
         if not conversation:
@@ -152,6 +154,8 @@ class GMConversationRepository(BaseRepository[GMConversation]):
             message["tool_calls"] = tool_calls
         if pending_action_ids:
             message["pending_action_ids"] = pending_action_ids
+        if tool_call_id:
+            message["tool_call_id"] = tool_call_id
 
         # 需要创建新列表以触发 SQLAlchemy 变更检测
         messages = list(conversation.messages)
@@ -491,6 +495,7 @@ class GMRepository:
         content: str,
         tool_calls: Optional[List[dict]] = None,
         pending_action_ids: Optional[List[str]] = None,
+        tool_call_id: Optional[str] = None,
     ) -> None:
         """追加消息到对话。"""
         await self.conversations.append_message(
@@ -499,4 +504,5 @@ class GMRepository:
             content=content,
             tool_calls=tool_calls,
             pending_action_ids=pending_action_ids,
+            tool_call_id=tool_call_id,
         )

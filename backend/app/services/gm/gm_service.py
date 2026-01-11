@@ -169,7 +169,7 @@ class GMService:
         tool_calls = response.get("tool_calls", [])
 
         # 8. 创建待执行操作
-        pending_actions = await self._create_pending_actions(
+        pending_actions, normalized_tool_calls = await self._create_pending_actions(
             conversation.id,
             len(conversation.messages),
             tool_calls,
@@ -183,13 +183,13 @@ class GMService:
             content=message,
         )
 
-        # 保存助手消息
+        # 保存助手消息（使用规范化的 tool_calls，其中 id 为 action.id）
         pending_action_ids = [a.action_id for a in pending_actions]
         await self.gm_repo.append_message(
             conversation_id=conversation.id,
             role="assistant",
             content=assistant_content,
-            tool_calls=tool_calls if tool_calls else None,
+            tool_calls=normalized_tool_calls if normalized_tool_calls else None,
             pending_action_ids=pending_action_ids if pending_action_ids else None,
         )
 
@@ -291,7 +291,7 @@ class GMService:
             return
 
         # 7. 创建待执行操作
-        pending_actions = await self._create_pending_actions(
+        pending_actions, normalized_tool_calls = await self._create_pending_actions(
             conversation.id,
             len(conversation.messages),
             tool_calls,
@@ -304,12 +304,13 @@ class GMService:
             content=message,
         )
 
+        # 保存助手消息（使用规范化的 tool_calls，其中 id 为 action.id）
         pending_action_ids = [a.action_id for a in pending_actions]
         await self.gm_repo.append_message(
             conversation_id=conversation.id,
             role="assistant",
             content=full_content,
-            tool_calls=tool_calls if tool_calls else None,
+            tool_calls=normalized_tool_calls if normalized_tool_calls else None,
             pending_action_ids=pending_action_ids if pending_action_ids else None,
         )
 
@@ -432,6 +433,14 @@ class GMService:
                 )
                 await self.gm_repo.update_action_status(action_id, "applied")
                 applied.append(action_id)
+
+                # 将工具执行结果添加到对话历史，让模型知道操作已完成
+                await self.gm_repo.append_message(
+                    conversation_id=action.conversation_id,
+                    role="tool",
+                    content=result.message,
+                    tool_call_id=action_id,  # 使用 action_id 作为 tool_call_id
+                )
             else:
                 await self.gm_repo.update_action_status(
                     action_id, "failed", error_message=result.message
@@ -598,14 +607,38 @@ class GMService:
 - 如果用户的要求可能导致剧情矛盾，请指出并建议解决方案
 """
 
-    def _build_message_history(self, messages: List[Dict]) -> List[Dict[str, str]]:
-        """构建消息历史（用于 LLM 调用）。"""
+    def _build_message_history(self, messages: List[Dict]) -> List[Dict[str, Any]]:
+        """构建消息历史（用于 LLM 调用）。
+
+        包含 tool_calls 和 tool 结果消息，确保模型知道之前调用了什么工具以及执行结果。
+        """
         history = []
         for msg in messages:
-            history.append({
-                "role": msg["role"],
-                "content": msg["content"],
-            })
+            role = msg["role"]
+            content = msg["content"]
+
+            if role == "assistant":
+                # assistant 消息可能包含 tool_calls
+                assistant_msg: Dict[str, Any] = {
+                    "role": "assistant",
+                    "content": content,
+                }
+                if msg.get("tool_calls"):
+                    assistant_msg["tool_calls"] = msg["tool_calls"]
+                history.append(assistant_msg)
+            elif role == "tool":
+                # 工具执行结果消息
+                history.append({
+                    "role": "tool",
+                    "tool_call_id": msg.get("tool_call_id", ""),
+                    "content": msg.get("content", ""),
+                })
+            else:
+                # user 消息
+                history.append({
+                    "role": role,
+                    "content": content,
+                })
         return history
 
     async def _create_pending_actions(
@@ -613,9 +646,16 @@ class GMService:
         conversation_id: str,
         message_index: int,
         tool_calls: List[Dict],
-    ) -> List[PendingActionInfo]:
-        """创建待执行操作。"""
+    ) -> tuple[List[PendingActionInfo], List[Dict]]:
+        """创建待执行操作。
+
+        Returns:
+            tuple: (pending_actions, normalized_tool_calls)
+            - pending_actions: 待执行操作列表
+            - normalized_tool_calls: 规范化的 tool_calls，使用 action.id 作为 id
+        """
         actions = []
+        normalized_calls = []
 
         for call in tool_calls:
             tool_name = call.get("name") or call.get("function", {}).get("name")
@@ -657,7 +697,17 @@ class GMService:
                 preview=preview,
             ))
 
-        return actions
+            # 创建规范化的 tool_call，使用 action.id 作为 id
+            normalized_calls.append({
+                "id": action.id,
+                "type": "function",
+                "function": {
+                    "name": tool_name,
+                    "arguments": json.dumps(params, ensure_ascii=False),
+                },
+            })
+
+        return actions, normalized_calls
 
     def _generate_title(self, messages: List[Dict]) -> str:
         """根据对话内容生成标题。"""

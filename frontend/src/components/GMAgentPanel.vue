@@ -10,15 +10,6 @@
         <span class="font-semibold">AI 助手</span>
       </div>
       <div class="flex items-center gap-2">
-        <!-- 联网搜索开关 -->
-        <label class="flex items-center gap-1 text-sm cursor-pointer" title="启用联网搜索（仅 Gemini 模型支持）">
-          <input
-            type="checkbox"
-            v-model="enableWebSearch"
-            class="w-4 h-4 rounded border-white/50 text-indigo-600 focus:ring-indigo-500"
-          />
-          <span class="text-xs opacity-90">联网</span>
-        </label>
         <!-- 历史对话按钮 -->
         <button
           @click="toggleHistoryPanel"
@@ -149,11 +140,30 @@
               class="bg-white/90 rounded-lg p-2.5 border border-gray-200"
             >
               <div class="flex items-start justify-between gap-2">
-                <div class="flex-1">
-                  <span class="text-xs font-medium text-indigo-600">{{ getToolLabel(action.tool_name) }}</span>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-xs font-medium text-indigo-600">{{ getToolLabel(action.tool_name) }}</span>
+                    <!-- 展开/收起按钮 -->
+                    <button
+                      v-if="action.params && Object.keys(action.params).length > 0"
+                      @click="toggleActionDetails(action.action_id)"
+                      class="p-0.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
+                      :title="expandedActions.has(action.action_id) ? '收起详情' : '展开详情'"
+                    >
+                      <svg
+                        class="w-3 h-3 transition-transform"
+                        :class="expandedActions.has(action.action_id) ? 'rotate-180' : ''"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                      </svg>
+                    </button>
+                  </div>
                   <p class="text-xs text-gray-600 mt-0.5">{{ action.preview }}</p>
                 </div>
-                <div v-if="action.status === 'pending'" class="flex gap-1">
+                <div v-if="action.status === 'pending'" class="flex gap-1 flex-shrink-0">
                   <button
                     @click="applyAction(action.action_id)"
                     :disabled="isApplying"
@@ -175,10 +185,53 @@
                     </svg>
                   </button>
                 </div>
-                <span v-else :class="getStatusClass(action.status)" class="text-xs px-1.5 py-0.5 rounded">
+                <span v-else :class="getStatusClass(action.status)" class="text-xs px-1.5 py-0.5 rounded flex-shrink-0">
                   {{ getStatusLabel(action.status) }}
                 </span>
               </div>
+              <!-- 展开的详情内容 -->
+              <Transition
+                enter-active-class="transition-all duration-200 ease-out"
+                leave-active-class="transition-all duration-150 ease-in"
+                enter-from-class="opacity-0 max-h-0"
+                leave-to-class="opacity-0 max-h-0"
+                enter-to-class="opacity-100 max-h-96"
+                leave-from-class="opacity-100 max-h-96"
+              >
+                <div
+                  v-if="expandedActions.has(action.action_id) && action.params && Object.keys(action.params).length > 0"
+                  class="mt-2 pt-2 border-t border-gray-100 space-y-1 overflow-hidden"
+                >
+                  <div
+                    v-for="(value, key) in action.params"
+                    :key="key"
+                    class="text-xs"
+                  >
+                    <span class="text-gray-500">{{ formatParamKey(String(key)) }}:</span>
+                    <span class="text-gray-700 ml-1 whitespace-pre-wrap break-words">{{ formatParamValue(value) }}</span>
+                  </div>
+                </div>
+              </Transition>
+            </div>
+            <!-- 单条消息批量操作按钮 -->
+            <div
+              v-if="msg.actions && msg.actions.filter(a => a.status === 'pending').length > 1"
+              class="flex justify-end gap-2 mt-2 pt-2 border-t border-gray-100"
+            >
+              <button
+                @click="applyMessageActions(index)"
+                :disabled="isApplying"
+                class="px-2 py-1 text-xs bg-green-500 text-white rounded hover:bg-green-600 disabled:opacity-50 transition-colors"
+              >
+                全部应用 ({{ msg.actions.filter(a => a.status === 'pending').length }})
+              </button>
+              <button
+                @click="discardMessageActions(index)"
+                :disabled="isApplying"
+                class="px-2 py-1 text-xs bg-gray-400 text-white rounded hover:bg-gray-500 disabled:opacity-50 transition-colors"
+              >
+                全部放弃
+              </button>
             </div>
           </div>
         </div>
@@ -207,31 +260,6 @@
       </div>
     </div>
 
-    <!-- 批量操作栏 -->
-    <div v-if="pendingActionsCount > 0" class="px-4 py-2 bg-amber-50 border-t border-amber-200 flex-shrink-0">
-      <div class="flex items-center justify-between">
-        <span class="text-sm text-amber-800">
-          {{ pendingActionsCount }} 个待执行操作
-        </span>
-        <div class="flex gap-2">
-          <button
-            @click="applyAllPending"
-            :disabled="isApplying"
-            class="px-3 py-1 text-xs bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:opacity-50"
-          >
-            全部应用
-          </button>
-          <button
-            @click="discardAllPending"
-            :disabled="isApplying"
-            class="px-3 py-1 text-xs bg-gray-400 text-white rounded-lg hover:bg-gray-500 disabled:opacity-50"
-          >
-            全部放弃
-          </button>
-        </div>
-      </div>
-    </div>
-
     <!-- 输入框 -->
     <div class="p-3 border-t border-gray-200 flex-shrink-0">
       <div class="flex gap-2 items-start">
@@ -243,15 +271,26 @@
           rows="3"
           class="flex-1 px-3 py-2 border border-gray-300 rounded-lg resize-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:bg-gray-100 text-sm"
         ></textarea>
-        <button
-          @click="sendMessage"
-          :disabled="!inputMessage.trim() || isLoading"
-          class="px-4 py-3 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-        >
-          <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-            <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z"/>
-          </svg>
-        </button>
+        <div class="flex flex-col items-center gap-2">
+          <button
+            @click="sendMessage"
+            :disabled="!inputMessage.trim() || isLoading"
+            class="px-4 py-3 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z"/>
+            </svg>
+          </button>
+          <!-- 联网搜索开关 -->
+          <label class="flex items-center gap-1 cursor-pointer" title="启用联网搜索（仅 Gemini 模型支持）">
+            <input
+              type="checkbox"
+              v-model="enableWebSearch"
+              class="w-3.5 h-3.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+            />
+            <span class="text-xs text-gray-500">联网</span>
+          </label>
+        </div>
       </div>
     </div>
   </div>
@@ -341,6 +380,7 @@ const isLoading = ref(false)
 const isStreaming = ref(false)
 const streamingContent = ref('')
 const isApplying = ref(false)
+const expandedActions = ref<Set<string>>(new Set())
 const conversationId = ref<string | null>(null)
 const enableWebSearch = ref(false)
 const messageContainer = ref<HTMLElement | null>(null)
@@ -473,6 +513,60 @@ function getStatusClass(status: string): string {
   return classes[status] || 'bg-gray-100 text-gray-600'
 }
 
+// 参数名映射
+const paramKeyLabels: Record<string, string> = {
+  name: '名称',
+  identity: '身份',
+  personality: '性格',
+  goals: '目标',
+  abilities: '能力',
+  relationship_to_protagonist: '与主角关系',
+  extra: '额外信息',
+  title: '标题',
+  genre: '题材',
+  style: '风格',
+  tone: '基调',
+  target_audience: '目标读者',
+  one_sentence_summary: '一句话简介',
+  full_synopsis: '故事概要',
+  world_setting: '世界观设定',
+  world_setting_patch: '世界观更新',
+  content: '内容',
+  summary: '摘要',
+  chapter_number: '章节号',
+  from_character: '角色A',
+  to_character: '角色B',
+  description: '描述',
+  relation_type: '关系类型',
+}
+
+// 格式化参数键名
+function formatParamKey(key: string): string {
+  return paramKeyLabels[key] || key
+}
+
+// 格式化参数值
+function formatParamValue(value: unknown): string {
+  if (value === null || value === undefined) return '(空)'
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value, null, 2)
+    } catch {
+      return String(value)
+    }
+  }
+  return String(value)
+}
+
+// 切换操作详情展开状态
+function toggleActionDetails(actionId: string) {
+  if (expandedActions.value.has(actionId)) {
+    expandedActions.value.delete(actionId)
+  } else {
+    expandedActions.value.add(actionId)
+  }
+}
+
 // 滚动到底部
 function scrollToBottom() {
   nextTick(() => {
@@ -590,6 +684,63 @@ async function discardAction(actionId: string) {
     }
   } catch (error) {
     console.error('放弃操作失败:', error)
+  } finally {
+    isApplying.value = false
+  }
+}
+
+// 应用指定消息的所有待执行操作
+async function applyMessageActions(msgIndex: number) {
+  const msg = messages.value[msgIndex]
+  if (!msg?.actions || isApplying.value) return
+
+  const pendingIds = msg.actions
+    .filter(a => a.status === 'pending')
+    .map(a => a.action_id)
+
+  if (pendingIds.length === 0) return
+
+  isApplying.value = true
+  try {
+    const result = await applyActions(props.projectId, pendingIds)
+
+    for (const action of msg.actions) {
+      const res = result.results.find(r => r.action_id === action.action_id)
+      if (res) {
+        action.status = res.success ? 'applied' : 'failed'
+      }
+    }
+
+    emit('refresh')
+  } catch (error) {
+    console.error('批量应用失败:', error)
+  } finally {
+    isApplying.value = false
+  }
+}
+
+// 放弃指定消息的所有待执行操作
+async function discardMessageActions(msgIndex: number) {
+  const msg = messages.value[msgIndex]
+  if (!msg?.actions || isApplying.value) return
+
+  const pendingIds = msg.actions
+    .filter(a => a.status === 'pending')
+    .map(a => a.action_id)
+
+  if (pendingIds.length === 0) return
+
+  isApplying.value = true
+  try {
+    await discardActions(props.projectId, pendingIds)
+
+    for (const action of msg.actions) {
+      if (action.status === 'pending') {
+        action.status = 'discarded'
+      }
+    }
+  } catch (error) {
+    console.error('批量放弃失败:', error)
   } finally {
     isApplying.value = false
   }
