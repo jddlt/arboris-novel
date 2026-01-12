@@ -551,6 +551,7 @@ class GMService:
                     {
                         "action_id": aid,
                         "tool_name": actions_map[aid].tool_name if aid in actions_map else None,
+                        "params": actions_map[aid].params if aid in actions_map else {},
                         "preview": actions_map[aid].preview_text if aid in actions_map else None,
                         "status": actions_map[aid].status if aid in actions_map else None,
                     }

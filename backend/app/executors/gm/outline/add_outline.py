@@ -58,6 +58,18 @@ class AddOutlineExecutor(BaseToolExecutor):
         return f"添加大纲：{title}（追加到末尾）"
 
     async def validate_params(self, params: Dict[str, Any]) -> Optional[str]:
+        # 参数别名标准化
+        if "chapter_index" in params and "chapter_number" not in params:
+            params["chapter_number"] = params.pop("chapter_index")
+        if "章节号" in params and "chapter_number" not in params:
+            params["chapter_number"] = params.pop("章节号")
+        if "标题" in params and "title" not in params:
+            params["title"] = params.pop("标题")
+        if "摘要" in params and "summary" not in params:
+            params["summary"] = params.pop("摘要")
+        if "内容" in params and "summary" not in params:
+            params["summary"] = params.pop("内容")
+
         title = params.get("title")
         summary = params.get("summary")
 

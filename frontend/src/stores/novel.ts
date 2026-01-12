@@ -50,7 +50,13 @@ export const useNovelStore = defineStore('novel', () => {
     }
     error.value = null
     try {
-      currentProject.value = await NovelAPI.getNovel(projectId)
+      const newProject = await NovelAPI.getNovel(projectId)
+      console.log('[novelStore] loadProject response:', {
+        id: newProject.id,
+        outlineCount: newProject.blueprint?.chapter_outline?.length,
+        outlines: newProject.blueprint?.chapter_outline?.map(o => ({ num: o.chapter_number, title: o.title }))
+      })
+      currentProject.value = newProject
     } catch (err) {
       error.value = err instanceof Error ? err.message : '加载项目失败'
     } finally {

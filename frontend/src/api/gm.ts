@@ -56,6 +56,7 @@ export interface ConversationMessage {
   actions?: {
     action_id: string
     tool_name: string
+    params: Record<string, unknown>
     preview: string
     status: string
   }[]

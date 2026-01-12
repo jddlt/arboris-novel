@@ -58,6 +58,18 @@ class UpdateOutlineExecutor(BaseToolExecutor):
         return f"修改大纲：第{chapter_number}章"
 
     async def validate_params(self, params: Dict[str, Any]) -> Optional[str]:
+        # 参数别名标准化: chapter_index/章节号 -> chapter_number
+        if "chapter_index" in params and "chapter_number" not in params:
+            params["chapter_number"] = params.pop("chapter_index")
+        if "章节号" in params and "chapter_number" not in params:
+            params["chapter_number"] = params.pop("章节号")
+        if "标题" in params and "title" not in params:
+            params["title"] = params.pop("标题")
+        if "摘要" in params and "summary" not in params:
+            params["summary"] = params.pop("摘要")
+        if "内容" in params and "summary" not in params:
+            params["summary"] = params.pop("内容")
+
         chapter_number = params.get("chapter_number")
         if chapter_number is None:
             return "必须指定章节号"

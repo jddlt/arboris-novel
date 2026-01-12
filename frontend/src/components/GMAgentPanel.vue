@@ -892,7 +892,7 @@ async function selectConversation(conv: ConversationSummary) {
       actions: msg.actions?.map(a => ({
         action_id: a.action_id,
         tool_name: a.tool_name || '',
-        params: {},
+        params: a.params || {},
         preview: a.preview || '',
         status: a.status as GMPendingAction['status'],
       })),

@@ -38,8 +38,10 @@ const showGMAgentPanel = computed(() => {
 
 // 刷新当前项目数据
 async function handleRefresh() {
+  console.log('[App] handleRefresh called, projectId:', currentProjectId.value)
   if (currentProjectId.value) {
     await novelStore.loadProject(currentProjectId.value, true)
+    console.log('[App] loadProject completed')
   }
 }
 </script>
