@@ -99,10 +99,12 @@ class UpdateBlueprintExecutor(BaseToolExecutor):
                             "locations": {
                                 "type": "array",
                                 "description": "主要地点列表",
+                                "items": {"type": "string"},
                             },
                             "factions": {
                                 "type": "array",
                                 "description": "势力/阵营列表",
+                                "items": {"type": "string"},
                             },
                         },
                     },

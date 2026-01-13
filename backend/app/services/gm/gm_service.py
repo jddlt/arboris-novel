@@ -208,8 +208,9 @@ class GMService:
         conversation_id: Optional[str] = None,
         user_id: Optional[int] = None,
         enable_web_search: bool = False,
+        images: Optional[List[Dict[str, str]]] = None,
     ) -> AsyncIterator[Dict[str, Any]]:
-        """流式处理用户消息，逐步返回 GM 响应。
+        """流式处理用户消息，支持多轮工具调用。
 
         Args:
             project_id: 小说项目 ID
@@ -217,15 +218,23 @@ class GMService:
             conversation_id: 对话 ID（可选，不传则创建新对话）
             user_id: 用户 ID（用于配额控制）
             enable_web_search: 是否启用联网搜索（仅 Gemini 模型支持）
+            images: 图片列表，每个元素包含 base64 和 mime_type
 
         Yields:
             dict: 流式事件
                 - {"type": "start", "conversation_id": "..."} 开始
                 - {"type": "content", "content": "..."} 内容片段
-                - {"type": "pending_actions", "actions": [...]} 待执行操作
+                - {"type": "tool_executing", "tool_name": "...", "params": {...}} 正在执行只读工具
+                - {"type": "tool_result", "tool_name": "...", "result": "..."} 只读工具执行结果
+                - {"type": "pending_actions", "actions": [...]} 待执行操作（修改类）
                 - {"type": "done", "message": "..."} 完成
                 - {"type": "error", "error": "..."} 错误
         """
+        from ...executors.gm.base import ToolResult
+
+        # 最大循环次数，防止无限循环
+        MAX_ITERATIONS = 10
+
         # 1. 获取或创建对话
         try:
             conversation = await self.gm_repo.get_or_create_conversation(
@@ -259,65 +268,237 @@ class GMService:
 
         # 4. 构建对话历史
         history = self._build_message_history(conversation.messages)
-        history.append({"role": "user", "content": message})
+        # 构建用户消息（支持图片）
+        user_message: Dict[str, Any] = {"role": "user", "content": message}
+        if images:
+            user_message["images"] = images
+        history.append(user_message)
 
         # 5. 获取工具定义
         tools = ToolRegistry.get_all_definitions()
 
-        # 6. 流式调用 LLM
-        full_content = ""
-        tool_calls = []
-
-        try:
-            async for event in self.llm_service.stream_chat_with_tools(
-                system_prompt=full_system_prompt,
-                messages=history,
-                tools=tools,
-                user_id=user_id,
-                enable_web_search=enable_web_search,
-            ):
-                event_type = event.get("type")
-
-                if event_type == "content":
-                    yield {"type": "content", "content": event["content"]}
-
-                elif event_type == "done":
-                    full_content = event.get("content", "")
-                    tool_calls = event.get("tool_calls", [])
-
-        except Exception as e:
-            logger.error("LLM 流式调用失败: %s", e, exc_info=True)
-            yield {"type": "error", "error": f"AI 服务暂时不可用: {str(e)}"}
-            return
-
-        # 7. 创建待执行操作
-        pending_actions, normalized_tool_calls = await self._create_pending_actions(
-            conversation.id,
-            len(conversation.messages),
-            tool_calls,
-        )
-
-        # 8. 保存消息到对话历史
+        # 6. 保存用户消息
         await self.gm_repo.append_message(
             conversation_id=conversation.id,
             role="user",
             content=message,
         )
 
-        # 保存助手消息（使用规范化的 tool_calls，其中 id 为 action.id）
-        pending_action_ids = [a.action_id for a in pending_actions]
-        await self.gm_repo.append_message(
-            conversation_id=conversation.id,
-            role="assistant",
-            content=full_content,
-            tool_calls=normalized_tool_calls if normalized_tool_calls else None,
-            pending_action_ids=pending_action_ids if pending_action_ids else None,
-        )
+        # 7. 多轮工具调用循环
+        all_pending_actions: List[PendingActionInfo] = []
+        all_content = ""
+        iteration = 0
+        # AI 通过 signal_task_status 工具设置的任务状态
+        # None: 未设置, "awaiting": 需要确认后继续, "complete": 任务完成
+        task_status_signal: Optional[str] = None
 
-        await self.session.commit()
+        while iteration < MAX_ITERATIONS:
+            iteration += 1
+            logger.debug("GM 对话第 %d 轮调用", iteration)
+
+            # 流式调用 LLM
+            full_content = ""
+            tool_calls = []
+
+            try:
+                async for event in self.llm_service.stream_chat_with_tools(
+                    system_prompt=full_system_prompt,
+                    messages=history,
+                    tools=tools,
+                    user_id=user_id,
+                    enable_web_search=enable_web_search,
+                ):
+                    event_type = event.get("type")
+
+                    if event_type == "content":
+                        yield {"type": "content", "content": event["content"]}
+                        full_content += event["content"]
+
+                    elif event_type == "done":
+                        full_content = event.get("content", "") or full_content
+                        tool_calls = event.get("tool_calls", [])
+
+            except Exception as e:
+                logger.error("LLM 流式调用失败: %s", e, exc_info=True)
+                yield {"type": "error", "error": f"AI 服务暂时不可用: {str(e)}"}
+                return
+
+            all_content += full_content
+
+            # 没有工具调用，结束循环
+            if not tool_calls:
+                logger.debug("无工具调用，结束循环")
+                break
+
+            # 分类工具调用
+            read_only_calls = []
+            write_calls = []
+
+            for call in tool_calls:
+                tool_name = call.get("name") or call.get("function", {}).get("name")
+                if not tool_name:
+                    continue
+
+                try:
+                    executor_class = ToolRegistry.get_executor(tool_name)
+                    if executor_class.is_read_only:
+                        read_only_calls.append(call)
+                    else:
+                        write_calls.append(call)
+                except ValueError:
+                    # 未知工具，当作修改类处理
+                    write_calls.append(call)
+
+            logger.debug(
+                "工具分类: 只读=%d, 修改=%d",
+                len(read_only_calls),
+                len(write_calls),
+            )
+
+            # 处理修改类工具 -> 创建 pending_actions
+            if write_calls:
+                pending_actions, normalized_tool_calls = await self._create_pending_actions(
+                    conversation.id,
+                    len(conversation.messages),
+                    write_calls,
+                )
+                all_pending_actions.extend(pending_actions)
+
+                # 保存助手消息（使用累积内容 all_content，确保多轮内容完整）
+                pending_action_ids = [a.action_id for a in pending_actions]
+                await self.gm_repo.append_message(
+                    conversation_id=conversation.id,
+                    role="assistant",
+                    content=all_content,  # 使用累积内容而非当前轮内容
+                    tool_calls=normalized_tool_calls if normalized_tool_calls else None,
+                    pending_action_ids=pending_action_ids if pending_action_ids else None,
+                )
+                await self.session.commit()
+
+            # 如果有修改类工具，结束循环（用户需要先确认操作）
+            # 即使同时有只读工具，也应该先让用户确认修改操作
+            if write_calls:
+                logger.debug("存在修改类工具调用，结束循环等待用户确认")
+                # 如果同时有只读工具，仍然执行它们但不继续循环
+                if not read_only_calls:
+                    break
+                # 执行只读工具后再退出
+            elif not read_only_calls:
+                logger.debug("无工具调用，结束循环")
+                break
+
+            # 执行只读工具并收集结果
+            tool_results_for_llm = []
+
+            for call in read_only_calls:
+                tool_name = call.get("name") or call.get("function", {}).get("name")
+                arguments = call.get("arguments") or call.get("function", {}).get("arguments")
+                call_id = call.get("id") or f"call_{len(tool_results_for_llm)}"
+
+                # 解析参数
+                if isinstance(arguments, str):
+                    try:
+                        params = json.loads(arguments)
+                    except json.JSONDecodeError:
+                        params = {"raw": arguments}
+                else:
+                    params = arguments or {}
+
+                # 通知前端正在执行
+                yield {
+                    "type": "tool_executing",
+                    "tool_name": tool_name,
+                    "params": params,
+                }
+
+                # 执行工具
+                try:
+                    executor_class = ToolRegistry.get_executor(tool_name)
+                    executor = executor_class(self.session)
+
+                    # 参数校验
+                    error = await executor.validate_params(params)
+                    if error:
+                        result_message = f"参数校验失败: {error}"
+                    else:
+                        result: ToolResult = await executor.execute(project_id, params)
+                        if result.data:
+                            result_message = f"{result.message}\n\n数据:\n{json.dumps(result.data, ensure_ascii=False, indent=2)}"
+                        else:
+                            result_message = result.message
+
+                        # 捕获 signal_task_status 工具的信号
+                        if tool_name == "signal_task_status" and result.data:
+                            task_status_signal = result.data.get("status")
+                            logger.info("AI 设置任务状态信号: %s", task_status_signal)
+
+                except Exception as e:
+                    logger.error("只读工具执行失败: %s, error=%s", tool_name, e, exc_info=True)
+                    result_message = f"执行失败: {str(e)}"
+
+                logger.info(
+                    "只读工具执行: tool=%s, result_preview=%s",
+                    tool_name,
+                    result_message[:200],
+                )
+
+                # 通知前端执行结果
+                yield {
+                    "type": "tool_result",
+                    "tool_name": tool_name,
+                    "result": result_message[:500] + "..." if len(result_message) > 500 else result_message,
+                }
+
+                # 收集结果用于下一轮 LLM 调用
+                tool_results_for_llm.append({
+                    "call_id": call_id,
+                    "tool_name": tool_name,
+                    "result": result_message,
+                })
+
+            # 更新历史，加入助手消息和工具结果
+            history.append({
+                "role": "assistant",
+                "content": full_content,
+                "tool_calls": [
+                    {
+                        "id": r["call_id"],
+                        "type": "function",
+                        "function": {
+                            "name": r["tool_name"],
+                            "arguments": "{}",  # 简化，不需要保存完整参数
+                        },
+                    }
+                    for r in tool_results_for_llm
+                ],
+            })
+
+            for r in tool_results_for_llm:
+                history.append({
+                    "role": "tool",
+                    "tool_call_id": r["call_id"],
+                    "tool_name": r["tool_name"],  # Gemini 格式需要工具名称
+                    "content": r["result"],
+                })
+
+            # 如果本轮有修改类工具，执行完只读工具后结束循环
+            if write_calls:
+                logger.debug("修改类工具已创建，只读工具执行完毕，结束循环")
+                break
+
+            # 继续下一轮循环
+
+        # 8. 如果没有保存过助手消息（没有修改类工具），现在保存
+        if not all_pending_actions and all_content:
+            await self.gm_repo.append_message(
+                conversation_id=conversation.id,
+                role="assistant",
+                content=all_content,
+            )
+            await self.session.commit()
 
         # 9. 发送待执行操作
-        if pending_actions:
+        if all_pending_actions:
             yield {
                 "type": "pending_actions",
                 "actions": [
@@ -328,15 +509,27 @@ class GMService:
                         "preview": a.preview,
                         "status": a.status,
                     }
-                    for a in pending_actions
+                    for a in all_pending_actions
                 ],
+                # 标识是否有后续任务（Agent 可能还没完成）
+                "has_more": iteration < MAX_ITERATIONS,
             }
 
         # 10. 发送完成事件
+        # 判断是否需要确认后继续：
+        # 1. 如果 AI 明确调用了 signal_task_status，以其信号为准
+        # 2. 如果没有调用且有待执行操作，默认需要确认后继续（兼容旧逻辑）
+        if task_status_signal is not None:
+            awaiting = task_status_signal == "awaiting"
+        else:
+            # 兼容：如果 AI 没有调用 signal_task_status，有操作就默认需要继续
+            awaiting = len(all_pending_actions) > 0
+
         yield {
             "type": "done",
             "conversation_id": conversation.id,
-            "message": full_content,
+            "message": all_content,
+            "awaiting_confirmation": awaiting,
         }
 
     async def apply_actions(
@@ -485,6 +678,64 @@ class GMService:
 
         await self.session.commit()
         return count
+
+    async def continue_chat(
+        self,
+        project_id: str,
+        conversation_id: str,
+        action_results: List[Dict[str, Any]],
+        user_id: Optional[int] = None,
+        enable_web_search: bool = False,
+    ) -> AsyncIterator[Dict[str, Any]]:
+        """在用户应用操作后继续对话。
+
+        将操作执行结果反馈给模型，让模型根据结果决定下一步。
+
+        Args:
+            project_id: 小说项目 ID
+            conversation_id: 对话 ID
+            action_results: 操作执行结果列表，每个包含 action_id, success, message
+            user_id: 用户 ID（用于配额控制）
+            enable_web_search: 是否启用联网搜索
+
+        Yields:
+            dict: 流式事件（与 stream_chat 相同）
+        """
+        # 获取对话
+        conversation = await self.gm_repo.conversations.get_by_id(conversation_id)
+        if not conversation:
+            yield {"type": "error", "error": "对话不存在"}
+            return
+
+        # 构造执行结果消息
+        result_lines = []
+        success_count = 0
+        fail_count = 0
+
+        for r in action_results:
+            status = "✓" if r.get("success") else "✗"
+            message = r.get("message", "")
+            if r.get("success"):
+                success_count += 1
+            else:
+                fail_count += 1
+            result_lines.append(f"  {status} {message}")
+
+        summary = f"执行了 {len(action_results)} 个操作"
+        if fail_count > 0:
+            summary += f"（{success_count} 成功，{fail_count} 失败）"
+
+        result_message = f"[操作执行结果]\n{summary}\n" + "\n".join(result_lines)
+
+        # 调用 stream_chat 继续对话
+        async for event in self.stream_chat(
+            project_id=project_id,
+            message=result_message,
+            conversation_id=conversation_id,
+            user_id=user_id,
+            enable_web_search=enable_web_search,
+        ):
+            yield event
 
     async def get_conversations(
         self,

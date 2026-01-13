@@ -17,31 +17,125 @@
           <h3 class="text-base font-semibold text-slate-900">章节</h3>
           <span class="text-xs text-slate-500">{{ chapters.length }} 篇</span>
         </div>
-        <ul class="flex-1 h-full overflow-y-auto divide-y divide-slate-200 overscroll-contain">
-          <li v-for="(chapter, index) in chapters" :key="chapter.chapter_number">
-            <button
-              class="w-full text-left px-5 py-3 transition-colors duration-200"
-              :class="selectedChapter?.chapter_number === chapter.chapter_number ? 'bg-indigo-50 text-indigo-600 font-semibold' : 'hover:bg-slate-50 lg:hover:bg-white text-slate-700'"
-              @click="selectChapter(chapter.chapter_number)"
-            >
-              <div class="flex items-center justify-between gap-3">
-                <div class="flex items-center gap-3 min-w-0">
-                  <span class="inline-flex items-center justify-center w-6 h-6 text-xs font-semibold text-slate-500 bg-slate-100 rounded-full">
-                    {{ index + 1 }}
+        <div class="flex-1 h-full overflow-y-auto overscroll-contain">
+          <!-- 有卷结构时按卷分组显示 -->
+          <template v-if="volumes.length > 0">
+            <!-- 按卷分组 -->
+            <div v-for="volume in volumes" :key="volume.volume_number" class="border-b border-slate-200">
+              <!-- 卷标题（可点击展开/收起） -->
+              <button
+                class="w-full flex items-center justify-between px-4 py-3 bg-slate-100/80 hover:bg-slate-200/80 transition-colors"
+                @click="toggleVolume(volume.volume_number)"
+              >
+                <div class="flex items-center gap-2">
+                  <svg
+                    class="w-4 h-4 text-slate-500 transition-transform duration-200"
+                    :class="expandedVolumes.has(volume.volume_number) ? 'rotate-90' : ''"
+                    fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                  >
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                  </svg>
+                  <span
+                    class="w-6 h-6 rounded text-xs font-bold flex items-center justify-center"
+                    :class="{
+                      'bg-green-500 text-white': volume.status === 'completed',
+                      'bg-indigo-500 text-white': volume.status === 'in_progress',
+                      'bg-slate-400 text-white': volume.status === 'planned' || !volume.status
+                    }"
+                  >
+                    {{ volume.volume_number }}
                   </span>
-                  <span class="truncate">{{ chapter.title || `第${chapter.chapter_number}章` }}</span>
+                  <span class="text-sm font-medium text-slate-800 truncate">{{ volume.title }}</span>
                 </div>
-                <span v-if="chapterCache.has(chapter.chapter_number)" class="text-xs text-slate-400">
-                  {{ calculateWordCount(chapterCache.get(chapter.chapter_number)?.content) }} 字
-                </span>
-                <span v-else class="text-xs text-slate-400">-</span>
+                <div class="flex items-center gap-2">
+                  <span class="text-xs text-slate-500">{{ getChaptersInVolume(volume).length }}章</span>
+                </div>
+              </button>
+              <!-- 卷内章节列表 -->
+              <ul
+                v-show="expandedVolumes.has(volume.volume_number)"
+                class="divide-y divide-slate-100"
+              >
+                <li v-for="chapter in getChaptersInVolume(volume)" :key="chapter.chapter_number">
+                  <button
+                    class="w-full text-left pl-10 pr-4 py-2.5 transition-colors duration-200"
+                    :class="selectedChapter?.chapter_number === chapter.chapter_number ? 'bg-indigo-50 text-indigo-600 font-semibold' : 'hover:bg-slate-50 lg:hover:bg-white text-slate-700'"
+                    @click="selectChapter(chapter.chapter_number)"
+                  >
+                    <div class="flex items-center justify-between gap-2">
+                      <div class="flex items-center gap-2 min-w-0">
+                        <span class="inline-flex items-center justify-center w-5 h-5 text-xs text-slate-500 bg-slate-100 rounded">
+                          {{ chapter.chapter_number }}
+                        </span>
+                        <span class="truncate text-sm">{{ chapter.title || `第${chapter.chapter_number}章` }}</span>
+                      </div>
+                      <span v-if="chapterCache.has(chapter.chapter_number)" class="text-xs text-slate-400 flex-shrink-0">
+                        {{ calculateWordCount(chapterCache.get(chapter.chapter_number)?.content) }}字
+                      </span>
+                    </div>
+                  </button>
+                </li>
+                <li v-if="getChaptersInVolume(volume).length === 0" class="px-10 py-3 text-xs text-slate-400">
+                  暂无章节
+                </li>
+              </ul>
+            </div>
+            <!-- 未分配到卷的章节 -->
+            <div v-if="unassignedChapters.length > 0" class="border-b border-slate-200">
+              <div class="px-4 py-3 bg-amber-50/80">
+                <span class="text-sm font-medium text-amber-700">未分配章节</span>
+                <span class="ml-2 text-xs text-amber-600">{{ unassignedChapters.length }}章</span>
               </div>
-              <p v-if="chapter.summary" class="mt-1 text-xs text-slate-500 truncate">
-                {{ chapter.summary }}
-              </p>
-            </button>
-          </li>
-        </ul>
+              <ul class="divide-y divide-slate-100">
+                <li v-for="chapter in unassignedChapters" :key="chapter.chapter_number">
+                  <button
+                    class="w-full text-left pl-6 pr-4 py-2.5 transition-colors duration-200"
+                    :class="selectedChapter?.chapter_number === chapter.chapter_number ? 'bg-indigo-50 text-indigo-600 font-semibold' : 'hover:bg-slate-50 lg:hover:bg-white text-slate-700'"
+                    @click="selectChapter(chapter.chapter_number)"
+                  >
+                    <div class="flex items-center justify-between gap-2">
+                      <div class="flex items-center gap-2 min-w-0">
+                        <span class="inline-flex items-center justify-center w-5 h-5 text-xs text-slate-500 bg-slate-100 rounded">
+                          {{ chapter.chapter_number }}
+                        </span>
+                        <span class="truncate text-sm">{{ chapter.title || `第${chapter.chapter_number}章` }}</span>
+                      </div>
+                      <span v-if="chapterCache.has(chapter.chapter_number)" class="text-xs text-slate-400 flex-shrink-0">
+                        {{ calculateWordCount(chapterCache.get(chapter.chapter_number)?.content) }}字
+                      </span>
+                    </div>
+                  </button>
+                </li>
+              </ul>
+            </div>
+          </template>
+          <!-- 无卷结构时平铺显示 -->
+          <ul v-else class="divide-y divide-slate-200">
+            <li v-for="(chapter, index) in chapters" :key="chapter.chapter_number">
+              <button
+                class="w-full text-left px-5 py-3 transition-colors duration-200"
+                :class="selectedChapter?.chapter_number === chapter.chapter_number ? 'bg-indigo-50 text-indigo-600 font-semibold' : 'hover:bg-slate-50 lg:hover:bg-white text-slate-700'"
+                @click="selectChapter(chapter.chapter_number)"
+              >
+                <div class="flex items-center justify-between gap-3">
+                  <div class="flex items-center gap-3 min-w-0">
+                    <span class="inline-flex items-center justify-center w-6 h-6 text-xs font-semibold text-slate-500 bg-slate-100 rounded-full">
+                      {{ index + 1 }}
+                    </span>
+                    <span class="truncate">{{ chapter.title || `第${chapter.chapter_number}章` }}</span>
+                  </div>
+                  <span v-if="chapterCache.has(chapter.chapter_number)" class="text-xs text-slate-400">
+                    {{ calculateWordCount(chapterCache.get(chapter.chapter_number)?.content) }} 字
+                  </span>
+                  <span v-else class="text-xs text-slate-400">-</span>
+                </div>
+                <p v-if="chapter.summary" class="mt-1 text-xs text-slate-500 truncate">
+                  {{ chapter.summary }}
+                </p>
+              </button>
+            </li>
+          </ul>
+        </div>
       </aside>
 
       <section class="flex-1 flex flex-col bg-white h-full min-h-0 max-h-full overflow-hidden relative">
@@ -423,8 +517,18 @@ interface ChapterDetail extends ChapterItem {
   generation_status?: string
 }
 
+interface Volume {
+  id?: string
+  volume_number: number
+  title: string
+  chapter_start: number
+  chapter_end: number
+  status?: string
+}
+
 const props = defineProps<{
   chapters: ChapterItem[]
+  volumes?: Volume[]
   isAdmin?: boolean
 }>()
 
@@ -450,6 +554,47 @@ const versionModal = ref({
 const chapterCache = new Map<number, ChapterDetail>()
 
 const chapters = computed(() => props.chapters || [])
+const volumes = computed(() => props.volumes || [])
+
+// 卷展开状态
+const expandedVolumes = ref<Set<number>>(new Set())
+
+// 初始化时默认展开所有卷
+watch(volumes, (list) => {
+  if (list.length > 0 && expandedVolumes.value.size === 0) {
+    list.forEach(v => expandedVolumes.value.add(v.volume_number))
+  }
+}, { immediate: true })
+
+// 切换卷展开状态
+const toggleVolume = (volumeNumber: number) => {
+  if (expandedVolumes.value.has(volumeNumber)) {
+    expandedVolumes.value.delete(volumeNumber)
+  } else {
+    expandedVolumes.value.add(volumeNumber)
+  }
+}
+
+// 获取某卷下的章节
+const getChaptersInVolume = (volume: Volume) => {
+  return chapters.value.filter(ch => ch.volume_id === volume.volume_number)
+}
+
+// 获取未分配到任何卷的章节
+const unassignedChapters = computed(() => {
+  if (volumes.value.length === 0) return chapters.value
+  return chapters.value.filter(ch => !ch.volume_id)
+})
+
+// 获取卷状态标签
+const getVolumeStatusLabel = (status?: string) => {
+  const labels: Record<string, string> = {
+    completed: '已完成',
+    in_progress: '写作中',
+    planned: '规划中',
+  }
+  return labels[status || 'planned'] || '规划中'
+}
 
 // Tab 配置
 const tabs = [

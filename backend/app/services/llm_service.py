@@ -191,7 +191,7 @@ class LLMService:
     async def chat_with_tools(
         self,
         system_prompt: str,
-        messages: List[Dict[str, str]],
+        messages: List[Dict[str, Any]],
         tools: List[Dict],
         *,
         temperature: float = 0.7,
@@ -217,7 +217,24 @@ class LLMService:
             包含 content 和 tool_calls 的字典
         """
         config = await self._resolve_llm_config(user_id)
+        model_name = (config.get("model") or "").lower()
+        is_gemini = "gemini" in model_name
 
+        # Gemini 模型统一使用原生 API 格式（更好的工具调用支持）
+        if is_gemini:
+            logger.info("使用 Gemini 原生 API 格式（非流式）")
+            return await self._call_gemini_native(
+                config=config,
+                system_prompt=system_prompt,
+                messages=messages,
+                tools=tools,
+                temperature=temperature,
+                timeout=timeout,
+                enable_web_search=enable_web_search,
+                user_id=user_id,
+            )
+
+        # 其他模型使用 OpenAI 兼容格式
         from openai import AsyncOpenAI
 
         client = AsyncOpenAI(
@@ -225,26 +242,21 @@ class LLMService:
             base_url=config.get("base_url"),
         )
 
-        # 构建消息
-        full_messages = [{"role": "system", "content": system_prompt}]
-        full_messages.extend(messages)
+        # 构建消息（转换带图片的消息为 OpenAI 多模态格式）
+        full_messages: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}]
+        for msg in messages:
+            converted_msg = self._convert_message_to_openai_format(msg)
+            full_messages.append(converted_msg)
 
         # 构建工具列表
         final_tools = list(tools) if tools else []
 
-        # 如果启用联网搜索且是 Gemini 模型，添加 google_search 工具
-        model_name = (config.get("model") or "").lower()
-        if enable_web_search and "gemini" in model_name:
-            final_tools.append({"google_search": {}})
-            logger.info("已启用 Gemini 联网搜索")
-
         logger.info(
-            "LLM chat_with_tools: model=%s user_id=%s messages=%d tools=%d web_search=%s",
+            "LLM chat_with_tools (OpenAI格式): model=%s user_id=%s messages=%d tools=%d",
             config.get("model"),
             user_id,
             len(full_messages),
             len(final_tools),
-            enable_web_search and "gemini" in model_name,
         )
 
         try:
@@ -297,10 +309,127 @@ class LLMService:
             "tool_calls": tool_calls,
         }
 
+    async def _call_gemini_native(
+        self,
+        config: Dict[str, Optional[str]],
+        system_prompt: str,
+        messages: List[Dict[str, str]],
+        tools: List[Dict],
+        temperature: float,
+        timeout: float,
+        enable_web_search: bool,
+        user_id: Optional[int],
+    ) -> Dict[str, Any]:
+        """使用 Gemini 原生 API 格式进行非流式调用。"""
+        import json
+
+        base_url = config.get("base_url") or "https://generativelanguage.googleapis.com"
+        api_key = config["api_key"]
+        model = config.get("model") or "gemini-2.0-flash"
+
+        # 构建 Gemini 格式的 contents
+        contents = self._convert_messages_to_gemini_format(system_prompt, messages)
+
+        # 构建 Gemini 格式的 tools
+        gemini_tools = self._convert_tools_to_gemini_format(tools, enable_web_search)
+
+        # 构建请求体
+        request_body: Dict[str, Any] = {
+            "contents": contents,
+            "generationConfig": {
+                "temperature": temperature,
+            },
+        }
+
+        if gemini_tools:
+            request_body["tools"] = gemini_tools
+
+        # 构建 URL（非流式端点）
+        # 处理 OpenAI 兼容代理格式 - 去掉 /v1 后缀
+        normalized_base_url = base_url.rstrip('/')
+        if normalized_base_url.endswith('/v1'):
+            normalized_base_url = normalized_base_url[:-3]
+
+        if "/models/" in base_url:
+            url = f"{base_url.rstrip('/')}:generateContent?key={api_key}"
+        else:
+            url = f"{normalized_base_url}/v1beta/models/{model}:generateContent?key={api_key}"
+
+        logger.info(
+            "Gemini 原生非流式请求: model=%s url=%s tools=%d web_search=%s",
+            model,
+            url.split("?")[0],
+            len(gemini_tools) if gemini_tools else 0,
+            enable_web_search,
+        )
+
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.post(
+                    url,
+                    json=request_body,
+                    headers={"Content-Type": "application/json"},
+                )
+
+                if response.status_code != 200:
+                    logger.error("Gemini API 错误: status=%d, body=%s", response.status_code, response.text)
+                    raise HTTPException(
+                        status_code=response.status_code,
+                        detail=f"Gemini API 错误: {response.text}"
+                    )
+
+                data = response.json()
+
+        except httpx.TimeoutException as exc:
+            logger.error("Gemini API 超时: %s", exc)
+            raise HTTPException(status_code=504, detail="Gemini API 请求超时")
+        except httpx.RequestError as exc:
+            logger.error("Gemini API 请求错误: %s", exc, exc_info=True)
+            raise HTTPException(status_code=503, detail=f"Gemini API 连接错误: {str(exc)}")
+
+        # 解析响应
+        full_content = ""
+        tool_calls: List[Dict[str, Any]] = []
+
+        candidates = data.get("candidates", [])
+        for candidate in candidates:
+            content = candidate.get("content", {})
+            parts = content.get("parts", [])
+
+            for part in parts:
+                if "text" in part:
+                    full_content += part["text"]
+                if "functionCall" in part:
+                    fc = part["functionCall"]
+                    tool_calls.append({
+                        "id": f"call_{len(tool_calls)}",
+                        "name": fc.get("name", ""),
+                        "arguments": json.dumps(fc.get("args", {}), ensure_ascii=False),
+                    })
+
+        # 记录 grounding metadata
+        grounding_metadata = data.get("groundingMetadata")
+        if grounding_metadata:
+            logger.info("收到 Gemini grounding 元数据: %s", list(grounding_metadata.keys()))
+
+        await self.usage_service.increment("api_request_count")
+
+        logger.info(
+            "Gemini 原生非流式请求完成: model=%s content_len=%d tool_calls=%d",
+            model,
+            len(full_content),
+            len(tool_calls),
+        )
+
+        return {
+            "content": full_content,
+            "tool_calls": tool_calls,
+        }
+
     async def stream_chat_with_tools(
         self,
         system_prompt: str,
-        messages: List[Dict[str, str]],
+        messages: List[Dict[str, Any]],
         tools: List[Dict],
         *,
         temperature: float = 0.7,
@@ -315,7 +444,7 @@ class LLMService:
 
         Args:
             system_prompt: 系统提示词
-            messages: 对话历史
+            messages: 对话历史（支持带 images 字段的消息）
             tools: 工具定义列表（OpenAI Function Calling 格式）
             temperature: 温度参数
             user_id: 用户 ID（用于配额控制）
@@ -328,7 +457,26 @@ class LLMService:
                   {"type": "done", "content": "...", "tool_calls": [...]}
         """
         config = await self._resolve_llm_config(user_id)
+        model_name = (config.get("model") or "").lower()
+        is_gemini = "gemini" in model_name
 
+        # Gemini 模型统一使用原生 API 格式（更好的工具调用支持）
+        if is_gemini:
+            logger.info("使用 Gemini 原生 API 格式（流式）")
+            async for event in self._stream_gemini_native(
+                config=config,
+                system_prompt=system_prompt,
+                messages=messages,
+                tools=tools,
+                temperature=temperature,
+                timeout=timeout,
+                enable_web_search=enable_web_search,
+                user_id=user_id,
+            ):
+                yield event
+            return
+
+        # 其他模型使用 OpenAI 兼容格式
         from openai import AsyncOpenAI
 
         client = AsyncOpenAI(
@@ -336,26 +484,21 @@ class LLMService:
             base_url=config.get("base_url"),
         )
 
-        # 构建消息
-        full_messages = [{"role": "system", "content": system_prompt}]
-        full_messages.extend(messages)
+        # 构建消息（转换带图片的消息为 OpenAI 多模态格式）
+        full_messages: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}]
+        for msg in messages:
+            converted_msg = self._convert_message_to_openai_format(msg)
+            full_messages.append(converted_msg)
 
         # 构建工具列表
         final_tools = list(tools) if tools else []
 
-        # 如果启用联网搜索且是 Gemini 模型，添加 google_search 工具
-        model_name = (config.get("model") or "").lower()
-        if enable_web_search and "gemini" in model_name:
-            final_tools.append({"google_search": {}})
-            logger.info("已启用 Gemini 联网搜索（流式）")
-
         logger.info(
-            "LLM stream_chat_with_tools: model=%s user_id=%s messages=%d tools=%d web_search=%s",
+            "LLM stream_chat_with_tools (OpenAI格式): model=%s user_id=%s messages=%d tools=%d",
             config.get("model"),
             user_id,
             len(full_messages),
             len(final_tools),
-            enable_web_search and "gemini" in model_name,
         )
 
         try:
@@ -445,6 +588,367 @@ class LLMService:
             "content": full_content,
             "tool_calls": tool_calls,
         }
+
+    async def _stream_gemini_native(
+        self,
+        config: Dict[str, Optional[str]],
+        system_prompt: str,
+        messages: List[Dict[str, str]],
+        tools: List[Dict],
+        temperature: float,
+        timeout: float,
+        enable_web_search: bool,
+        user_id: Optional[int],
+    ):
+        """使用 Gemini 原生 API 格式进行流式调用。
+
+        Gemini REST API 格式与 OpenAI 不同，需要单独处理。
+        参考: https://ai.google.dev/gemini-api/docs/text-generation
+        """
+        import json
+
+        base_url = config.get("base_url") or "https://generativelanguage.googleapis.com"
+        api_key = config["api_key"]
+        model = config.get("model") or "gemini-2.0-flash"
+
+        # 构建 Gemini 格式的 contents
+        contents = self._convert_messages_to_gemini_format(system_prompt, messages)
+
+        # 构建 Gemini 格式的 tools
+        gemini_tools = self._convert_tools_to_gemini_format(tools, enable_web_search)
+
+        # 构建请求体
+        request_body: Dict[str, Any] = {
+            "contents": contents,
+            "generationConfig": {
+                "temperature": temperature,
+            },
+        }
+
+        if gemini_tools:
+            request_body["tools"] = gemini_tools
+
+        # 构建 URL（流式端点）
+        # 支持多种 URL 格式：
+        # 1. 官方格式: https://generativelanguage.googleapis.com/v1beta/models/gemini-xxx:streamGenerateContent
+        # 2. 代理 Gemini 格式: https://your-proxy.com/v1beta/models/gemini-xxx:streamGenerateContent
+        # 3. 代理 OpenAI 兼容格式: https://your-proxy.com/v1 (需要转换)
+
+        # 处理 OpenAI 兼容代理格式 - 去掉 /v1 后缀
+        normalized_base_url = base_url.rstrip('/')
+        if normalized_base_url.endswith('/v1'):
+            normalized_base_url = normalized_base_url[:-3]
+
+        if "/models/" in base_url:
+            # URL 已经包含 model 路径，直接追加 :streamGenerateContent
+            url = f"{base_url.rstrip('/')}:streamGenerateContent?alt=sse&key={api_key}"
+        else:
+            # 标准格式，需要拼接 model 路径
+            url = f"{normalized_base_url}/v1beta/models/{model}:streamGenerateContent?alt=sse&key={api_key}"
+
+        logger.info(
+            "Gemini 原生流式请求: model=%s url=%s tools=%d web_search=%s",
+            model,
+            url.split("?")[0],  # 隐藏 API key
+            len(gemini_tools) if gemini_tools else 0,
+            enable_web_search,
+        )
+        logger.debug("Gemini 请求体: %s", json.dumps(request_body, ensure_ascii=False, indent=2))
+
+        full_content = ""
+        tool_calls: List[Dict[str, Any]] = []
+
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                async with client.stream(
+                    "POST",
+                    url,
+                    json=request_body,
+                    headers={"Content-Type": "application/json"},
+                ) as response:
+                    if response.status_code != 200:
+                        error_text = await response.aread()
+                        logger.error("Gemini API 错误: status=%d, body=%s", response.status_code, error_text)
+                        raise HTTPException(
+                            status_code=response.status_code,
+                            detail=f"Gemini API 错误: {error_text.decode('utf-8', errors='ignore')}"
+                        )
+
+                    # 处理 SSE 流
+                    async for line in response.aiter_lines():
+                        if not line:
+                            continue
+
+                        # 记录原始行（调试用）
+                        if not line.startswith("data:"):
+                            logger.info("Gemini SSE 非 data 行: %s", line[:100])
+
+                        # SSE 格式: data: {...}
+                        if line.startswith("data: "):
+                            data_str = line[6:]  # 去掉 "data: " 前缀
+                            if data_str.strip() == "[DONE]":
+                                logger.info("收到 [DONE] 信号")
+                                break
+
+                            try:
+                                data = json.loads(data_str)
+                            except json.JSONDecodeError:
+                                logger.warning("无法解析 Gemini SSE 数据: %s", data_str[:200])
+                                continue
+
+                            # 检查是否有 finishReason
+                            candidates = data.get("candidates", [])
+                            for candidate in candidates:
+                                finish_reason = candidate.get("finishReason")
+                                if finish_reason:
+                                    logger.info("Gemini finishReason: %s", finish_reason)
+
+                            # 解析 Gemini 响应格式
+                            candidates = data.get("candidates", [])
+                            for candidate in candidates:
+                                content = candidate.get("content", {})
+                                parts = content.get("parts", [])
+
+                                # DEBUG: 记录每个 part 的结构
+                                for i, part in enumerate(parts):
+                                    part_keys = list(part.keys())
+                                    logger.info("Gemini part[%d] keys: %s", i, part_keys)
+
+                                for part in parts:
+                                    # 文本内容
+                                    if "text" in part:
+                                        text = part["text"]
+                                        full_content += text
+                                        yield {"type": "content", "content": text}
+                                        logger.debug("Gemini 返回文本: %s...", text[:100] if len(text) > 100 else text)
+
+                                    # 工具调用
+                                    if "functionCall" in part:
+                                        fc = part["functionCall"]
+                                        tool_calls.append({
+                                            "id": f"call_{len(tool_calls)}",
+                                            "name": fc.get("name", ""),
+                                            "arguments": json.dumps(fc.get("args", {}), ensure_ascii=False),
+                                        })
+                                        logger.debug("Gemini 返回工具调用: %s", fc.get("name", ""))
+
+                            # 检查 grounding metadata（google_search 结果）
+                            grounding_metadata = data.get("groundingMetadata")
+                            if grounding_metadata:
+                                logger.info("收到 Gemini grounding 元数据: %s", list(grounding_metadata.keys()))
+
+        except httpx.TimeoutException as exc:
+            logger.error("Gemini API 超时: %s", exc)
+            raise HTTPException(status_code=504, detail="Gemini API 请求超时")
+        except httpx.RequestError as exc:
+            logger.error("Gemini API 请求错误: %s", exc, exc_info=True)
+            raise HTTPException(status_code=503, detail=f"Gemini API 连接错误: {str(exc)}")
+
+        await self.usage_service.increment("api_request_count")
+
+        logger.info(
+            "Gemini 原生流式请求完成: model=%s content_len=%d tool_calls=%d",
+            model,
+            len(full_content),
+            len(tool_calls),
+        )
+
+        yield {
+            "type": "done",
+            "content": full_content,
+            "tool_calls": tool_calls,
+        }
+
+    def _convert_messages_to_gemini_format(
+        self,
+        system_prompt: str,
+        messages: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """将 OpenAI 格式的消息转换为 Gemini 格式。
+
+        Gemini 格式:
+        [
+            {"role": "user", "parts": [{"text": "..."}, {"inline_data": {"mime_type": "...", "data": "..."}}]},
+            {"role": "model", "parts": [{"text": "..."}, {"functionCall": {"name": "...", "args": {...}}}]},
+            {"role": "function", "parts": [{"functionResponse": {"name": "...", "response": {...}}}]},
+        ]
+
+        注意: Gemini 用 "model" 而不是 "assistant"
+        系统提示词需要作为第一条 user 消息的一部分
+        支持图片：消息中如果有 images 字段，转换为 inline_data parts
+        支持工具调用：assistant 消息中如果有 tool_calls 字段，转换为 functionCall parts
+        """
+        import json as _json
+
+        contents = []
+
+        # 处理消息
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            images = msg.get("images", [])
+            tool_calls = msg.get("tool_calls", [])
+
+            # 转换角色名
+            if role == "assistant":
+                gemini_role = "model"
+            elif role == "system":
+                # Gemini 不直接支持 system role，跳过（已在第一条消息中处理）
+                continue
+            elif role == "tool":
+                # 工具响应需要特殊处理
+                gemini_role = "function"
+            else:
+                gemini_role = "user"
+
+            # 如果是第一条 user 消息，prepend system prompt
+            if gemini_role == "user" and not contents and system_prompt:
+                content = f"{system_prompt}\n\n---\n\n{content}"
+
+            if gemini_role == "function":
+                # 工具响应格式
+                # 从 msg 中获取工具名称，如果没有则使用 tool_call_id
+                tool_name = msg.get("tool_name") or msg.get("tool_call_id", "unknown")
+                contents.append({
+                    "role": "function",
+                    "parts": [{
+                        "functionResponse": {
+                            "name": tool_name,
+                            "response": {"result": content}
+                        }
+                    }]
+                })
+            else:
+                # 构建 parts 列表
+                parts = []
+
+                # 添加文本内容
+                if content:
+                    parts.append({"text": content})
+
+                # 添加图片内容
+                if images:
+                    for img in images:
+                        parts.append({
+                            "inline_data": {
+                                "mime_type": img.get("mime_type", "image/png"),
+                                "data": img.get("base64", "")
+                            }
+                        })
+
+                # 添加工具调用内容（assistant/model 消息可能包含 tool_calls）
+                if tool_calls and gemini_role == "model":
+                    for tc in tool_calls:
+                        tc_name = tc.get("name") or tc.get("function", {}).get("name", "")
+                        tc_args_str = tc.get("arguments") or tc.get("function", {}).get("arguments", "{}")
+                        try:
+                            tc_args = _json.loads(tc_args_str) if isinstance(tc_args_str, str) else tc_args_str
+                        except _json.JSONDecodeError:
+                            tc_args = {}
+                        if tc_name:
+                            parts.append({
+                                "functionCall": {
+                                    "name": tc_name,
+                                    "args": tc_args
+                                }
+                            })
+
+                if parts:
+                    contents.append({
+                        "role": gemini_role,
+                        "parts": parts
+                    })
+
+        # 如果没有消息但有 system prompt，创建一条
+        if not contents and system_prompt:
+            contents.append({
+                "role": "user",
+                "parts": [{"text": system_prompt}]
+            })
+
+        return contents
+
+    def _convert_message_to_openai_format(
+        self,
+        msg: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """将带图片的消息转换为 OpenAI 多模态格式。
+
+        OpenAI 多模态格式:
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "..."},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}
+            ]
+        }
+
+        如果消息没有图片，保持原格式不变。
+        """
+        images = msg.get("images", [])
+        if not images:
+            # 没有图片，返回简化格式（兼容性更好）
+            return {"role": msg.get("role", "user"), "content": msg.get("content", "")}
+
+        # 有图片，转换为多模态格式
+        content_parts = []
+
+        # 添加文本部分
+        text_content = msg.get("content", "")
+        if text_content:
+            content_parts.append({"type": "text", "text": text_content})
+
+        # 添加图片部分
+        for img in images:
+            mime_type = img.get("mime_type", "image/png")
+            base64_data = img.get("base64", "")
+            data_url = f"data:{mime_type};base64,{base64_data}"
+            content_parts.append({
+                "type": "image_url",
+                "image_url": {"url": data_url}
+            })
+
+        return {"role": msg.get("role", "user"), "content": content_parts}
+
+    def _convert_tools_to_gemini_format(
+        self,
+        tools: List[Dict],
+        enable_web_search: bool,
+    ) -> List[Dict[str, Any]]:
+        """将 OpenAI 格式的工具定义转换为 Gemini 格式。
+
+        OpenAI 格式:
+        [{"type": "function", "function": {"name": "...", "description": "...", "parameters": {...}}}]
+
+        Gemini 格式:
+        [
+            {"functionDeclarations": [{"name": "...", "description": "...", "parameters": {...}}]},
+            {"google_search": {}}  # 可选
+        ]
+        """
+        gemini_tools = []
+
+        # 转换 function tools
+        function_declarations = []
+        for tool in tools:
+            if tool.get("type") == "function" and "function" in tool:
+                func = tool["function"]
+                function_declarations.append({
+                    "name": func.get("name"),
+                    "description": func.get("description"),
+                    "parameters": func.get("parameters"),
+                })
+
+        if function_declarations:
+            gemini_tools.append({"functionDeclarations": function_declarations})
+            logger.info("已转换 %d 个工具为 Gemini functionDeclarations 格式", len(function_declarations))
+
+        # 添加 google_search grounding 工具
+        if enable_web_search:
+            gemini_tools.append({"google_search": {}})
+            logger.info("已添加 Gemini google_search grounding 工具")
+
+        return gemini_tools
 
     async def _resolve_llm_config(self, user_id: Optional[int]) -> Dict[str, Optional[str]]:
         if user_id:

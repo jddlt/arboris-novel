@@ -12,6 +12,9 @@ from . import outline
 from . import search
 from . import chapter
 from . import blueprint
+from . import volume
+from . import foreshadowing
+from . import signal
 
 __all__ = [
     "BaseToolExecutor",

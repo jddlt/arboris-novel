@@ -76,6 +76,7 @@ def _clean_string(text: str, parse_json: bool = True) -> str:
 from fastapi import HTTPException, status
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from ..models import (
     BlueprintCharacter,
@@ -99,6 +100,7 @@ from ..schemas.novel import (
     NovelProjectSummary,
     NovelSectionResponse,
     NovelSectionType,
+    VolumeSchema,
 )
 
 
@@ -365,8 +367,16 @@ class NovelService:
                         chapter_number=outline.get("chapter_number"),
                         title=outline.get("title", ""),
                         summary=outline.get("summary"),
+                        volume_id=outline.get("volume_id"),
                     )
                 )
+        if "volumes" in patch and patch["volumes"] is not None:
+            # volumes 现在使用独立表管理，不再支持通过 patch_blueprint 更新
+            # 保留此分支以兼容旧代码，但不执行任何操作
+            pass
+        if "foreshadowing" in patch and patch["foreshadowing"] is not None:
+            existing = blueprint.foreshadowing or {}
+            blueprint.foreshadowing = {**existing, **patch["foreshadowing"]}
         await self.session.commit()
         await self._touch_project(project_id)
 
@@ -376,6 +386,7 @@ class NovelService:
     async def get_outline(self, project_id: str, chapter_number: int) -> Optional[ChapterOutline]:
         stmt = (
             select(ChapterOutline)
+            .options(selectinload(ChapterOutline.volume))
             .where(
                 ChapterOutline.project_id == project_id,
                 ChapterOutline.chapter_number == chapter_number,
@@ -467,6 +478,34 @@ class NovelService:
         await self.session.commit()
         await self._touch_project(project_id)
 
+    async def create_core_chapters(self, project_id: str, core_chapters: List[Dict]) -> None:
+        """批量创建核心章节（包含正文内容），标记为已完成状态。"""
+        for item in core_chapters:
+            chapter_number = item.get("chapter_number")
+            content = item.get("content")
+            if not chapter_number or not content:
+                continue
+
+            # 获取或创建 Chapter 记录
+            chapter = await self.get_or_create_chapter(project_id, chapter_number)
+
+            # 创建版本记录
+            version = ChapterVersion(
+                chapter_id=chapter.id,
+                content=content,
+                version_label="core",
+            )
+            self.session.add(version)
+            await self.session.flush()
+
+            # 设置为选中版本，标记完成
+            chapter.selected_version_id = version.id
+            chapter.status = ChapterGenerationStatus.SUCCESSFUL.value
+            chapter.word_count = len(content)
+
+        await self.session.commit()
+        await self._touch_project(project_id)
+
     # ------------------------------------------------------------------
     # 序列化辅助
     # ------------------------------------------------------------------
@@ -517,6 +556,20 @@ class NovelService:
             for number in chapter_numbers
         ]
 
+        # 序列化卷列表
+        volumes_schema = [
+            VolumeSchema(
+                id=vol.id,
+                volume_number=vol.volume_number,
+                title=vol.title,
+                summary=vol.summary,
+                core_conflict=vol.core_conflict,
+                climax=vol.climax,
+                status=vol.status,
+            )
+            for vol in sorted(project.volumes, key=lambda v: v.volume_number)
+        ]
+
         return NovelProjectSchema(
             id=project.id,
             user_id=project.user_id,
@@ -525,6 +578,7 @@ class NovelService:
             conversation_history=conversations,
             blueprint=blueprint_schema,
             chapters=chapters_schema,
+            volumes=volumes_schema,
         )
 
     async def _touch_project(self, project_id: str) -> None:
@@ -545,6 +599,20 @@ class NovelService:
                     world_setting = json.loads(world_setting)
                 except json.JSONDecodeError:
                     world_setting = {}
+            # 处理 volumes
+            volumes = blueprint_obj.volumes or {}
+            if isinstance(volumes, str):
+                try:
+                    volumes = json.loads(volumes)
+                except json.JSONDecodeError:
+                    volumes = {}
+            # 处理 foreshadowing
+            foreshadowing = blueprint_obj.foreshadowing or {}
+            if isinstance(foreshadowing, str):
+                try:
+                    foreshadowing = json.loads(foreshadowing)
+                except json.JSONDecodeError:
+                    foreshadowing = {}
             return Blueprint(
                 title=blueprint_obj.title or "",
                 target_audience=blueprint_obj.target_audience or "",
@@ -554,6 +622,8 @@ class NovelService:
                 one_sentence_summary=blueprint_obj.one_sentence_summary or "",
                 full_synopsis=blueprint_obj.full_synopsis or "",
                 world_setting=world_setting,
+                volumes=volumes,
+                foreshadowing=foreshadowing,
                 characters=[
                     {
                         "name": character.name,
@@ -580,6 +650,7 @@ class NovelService:
                         chapter_number=outline.chapter_number,
                         title=outline.title,
                         summary=outline.summary or "",
+                        volume_id=outline.volume_id,
                     )
                     for outline in sorted(project.outlines, key=lambda o: o.chapter_number)
                 ],
@@ -593,6 +664,8 @@ class NovelService:
             one_sentence_summary="",
             full_synopsis="",
             world_setting={},
+            volumes={},
+            foreshadowing={},
             characters=[],
             relationships=[],
             chapter_outline=[],
@@ -653,6 +726,28 @@ class NovelService:
                 "chapters": chapters,
                 "total": len(chapters),
             }
+        elif section == NovelSectionType.VOLUMES:
+            # 从 volumes 表获取卷数据
+            volumes_list = [
+                {
+                    "id": vol.id,
+                    "volume_number": vol.volume_number,
+                    "title": vol.title,
+                    "summary": vol.summary,
+                    "core_conflict": vol.core_conflict,
+                    "climax": vol.climax,
+                    "status": vol.status,
+                    "chapter_count": len([o for o in project.outlines if o.volume_id == vol.id]),
+                }
+                for vol in project.volumes
+            ]
+            data = {
+                "volumes": volumes_list,
+            }
+        elif section == NovelSectionType.FORESHADOWING:
+            data = {
+                "foreshadowing": blueprint.foreshadowing or {},
+            }
         else:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="未知的章节类型")
 
@@ -677,6 +772,7 @@ class NovelService:
 
         title = outline.title if outline else f"第{chapter_number}章"
         summary = outline.summary if outline else ""
+        volume_id = outline.volume_id if outline else None
         real_summary = chapter.real_summary if chapter else None
         content = None
         versions: Optional[List[str]] = None
@@ -705,6 +801,7 @@ class NovelService:
             chapter_number=chapter_number,
             title=title,
             summary=summary,
+            volume_id=volume_id,
             real_summary=real_summary,
             content=content,
             versions=versions,

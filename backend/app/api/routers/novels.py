@@ -285,8 +285,17 @@ async def generate_blueprint(
             detail=f"蓝图生成失败，AI 返回的内容格式不正确。请重试或联系管理员。错误详情: {str(exc)}"
         ) from exc
 
+    # 提取核心章节数据（不属于 Blueprint schema）
+    core_chapters = blueprint_data.pop("core_chapters", [])
+
     blueprint = Blueprint(**blueprint_data)
     await novel_service.replace_blueprint(project_id, blueprint)
+
+    # 创建核心章节（如果有）
+    if core_chapters:
+        logger.info("项目 %s 创建 %d 个核心章节", project_id, len(core_chapters))
+        await novel_service.create_core_chapters(project_id, core_chapters)
+
     if blueprint.title:
         project.title = blueprint.title
         project.status = "blueprint_ready"

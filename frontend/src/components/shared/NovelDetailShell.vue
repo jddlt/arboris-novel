@@ -34,12 +34,12 @@
               v-if="!isAdmin"
               class="px-3 py-2 text-sm font-medium text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded-lg transition-all duration-200 flex items-center gap-2"
               @click="gmPanelStore.openPanel()"
-              title="AI 助手"
+              title="剧本大师GM"
             >
               <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                 <path d="M10 2a6 6 0 00-6 6v3.586l-.707.707A1 1 0 004 14h12a1 1 0 00.707-1.707L16 11.586V8a6 6 0 00-6-6zm0 16a3 3 0 01-3-3h6a3 3 0 01-3 3z"/>
               </svg>
-              <span class="hidden sm:inline">AI 助手</span>
+              <span class="hidden sm:inline">剧本大师</span>
             </button>
             <button
               class="px-3 py-2 sm:px-4 text-sm font-medium text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg transition-all duration-200 hover:shadow-md"
@@ -164,6 +164,12 @@
                 :class="componentContainerClass"
                 @edit="handleSectionEdit"
                 @add="startAddChapter"
+                @update-characters="handleUpdateCharacters"
+                @update-relationships="handleUpdateRelationships"
+                @update-outline="handleUpdateOutline"
+                @update-world-setting="handleUpdateWorldSetting"
+                @update-volumes="handleUpdateVolumes"
+                @update-foreshadowing="handleUpdateForeshadowing"
               />
             </div>
           </div>
@@ -244,7 +250,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, h } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, h, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useNovelStore } from '@/stores/novel'
 import { useGMPanelStore } from '@/stores/gmPanel'
@@ -258,6 +264,8 @@ import CharactersSection from '@/components/novel-detail/CharactersSection.vue'
 import RelationshipsSection from '@/components/novel-detail/RelationshipsSection.vue'
 import ChapterOutlineSection from '@/components/novel-detail/ChapterOutlineSection.vue'
 import ChaptersSection from '@/components/novel-detail/ChaptersSection.vue'
+import VolumeSection from '@/components/novel-detail/VolumeSection.vue'
+import ForeshadowingSection from '@/components/novel-detail/ForeshadowingSection.vue'
 
 interface Props {
   isAdmin?: boolean
@@ -282,6 +290,8 @@ const sections: Array<{ key: SectionKey; label: string; description: string }> =
   { key: 'world_setting', label: '世界设定', description: '规则、地点与阵营' },
   { key: 'characters', label: '主要角色', description: '人物性格与目标' },
   { key: 'relationships', label: '人物关系', description: '角色之间的联系' },
+  { key: 'volumes', label: '卷结构', description: '长篇卷/篇章划分' },
+  { key: 'foreshadowing', label: '伏笔系统', description: '伏笔埋设与回收' },
   { key: 'chapter_outline', label: '章节大纲', description: props.isAdmin ? '故事章节规划' : '故事结构规划' },
   { key: 'chapters', label: '章节内容', description: props.isAdmin ? '生成章节与正文' : '生成状态与摘要' }
 ]
@@ -291,6 +301,8 @@ const sectionComponents: Record<SectionKey, any> = {
   world_setting: WorldSettingSection,
   characters: CharactersSection,
   relationships: RelationshipsSection,
+  volumes: VolumeSection,
+  foreshadowing: ForeshadowingSection,
   chapter_outline: ChapterOutlineSection,
   chapters: ChaptersSection
 }
@@ -325,6 +337,16 @@ const getSectionIcon = (key: SectionKey) => {
       h('line', { x1: 3, y1: 12, x2: 3.01, y2: 12 }),
       h('line', { x1: 3, y1: 18, x2: 3.01, y2: 18 })
     ]),
+    volumes: () => h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2 }, [
+      h('path', { d: 'M4 19.5A2.5 2.5 0 016.5 17H20' }),
+      h('path', { d: 'M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z' }),
+      h('line', { x1: 8, y1: 6, x2: 16, y2: 6 }),
+      h('line', { x1: 8, y1: 10, x2: 14, y2: 10 })
+    ]),
+    foreshadowing: () => h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2 }, [
+      h('circle', { cx: 12, cy: 12, r: 3 }),
+      h('path', { d: 'M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42' })
+    ]),
     chapters: () => h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2 }, [
       h('path', { d: 'M4 19.5A2.5 2.5 0 016.5 17H20' }),
       h('path', { d: 'M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z' })
@@ -339,6 +361,8 @@ const sectionLoading = reactive<Record<SectionKey, boolean>>({
   world_setting: false,
   characters: false,
   relationships: false,
+  volumes: false,
+  foreshadowing: false,
   chapter_outline: false,
   chapters: false
 })
@@ -347,6 +371,8 @@ const sectionError = reactive<Record<SectionKey, string | null>>({
   world_setting: null,
   characters: null,
   relationships: null,
+  volumes: null,
+  foreshadowing: null,
   chapter_outline: null,
   chapters: null
 })
@@ -445,6 +471,10 @@ const switchSection = (section: SectionKey) => {
     isSidebarOpen.value = false
   }
   loadSection(section)
+  // chapter_outline 和 chapters 依赖 volumes 数据
+  if (section === 'chapter_outline' || section === 'chapters') {
+    loadSection('volumes')
+  }
 }
 
 const goBack = () => router.push(props.isAdmin ? '/admin' : '/workspace')
@@ -474,10 +504,25 @@ const componentProps = computed(() => {
       return { data: data || null, editable }
     case 'relationships':
       return { data: data || null, editable }
-    case 'chapter_outline':
-      return { outline: data?.chapter_outline || [], editable }
-    case 'chapters':
-      return { chapters: data?.chapters || [], isAdmin: props.isAdmin }
+    case 'volumes':
+      return { data: data || null, editable }
+    case 'foreshadowing': {
+      // 获取当前章节数用于判断待回收伏笔
+      const chaptersData = sectionData.chapters
+      const currentChapter = chaptersData?.chapters?.length || 0
+      return { data: data || null, editable, currentChapter }
+    }
+    case 'chapter_outline': {
+      const volumesData = sectionData.volumes
+      const volumes = volumesData?.volumes || []
+      return { outline: data?.chapter_outline || [], volumes, editable }
+    }
+    case 'chapters': {
+      // 获取卷结构数据传给章节组件
+      const volumesData = sectionData.volumes
+      const volumes = volumesData?.volumes || []
+      return { chapters: data?.chapters || [], volumes, isAdmin: props.isAdmin }
+    }
     default:
       return {}
   }
@@ -489,6 +534,101 @@ const handleSectionEdit = (payload: { field: string; title: string; value: any }
   modalTitle.value = payload.title
   modalContent.value = payload.value
   isModalOpen.value = true
+}
+
+const handleUpdateCharacters = async (characters: any[]) => {
+  if (props.isAdmin) return
+  await ensureProjectLoaded()
+  const project = novel.value
+  if (!project) return
+
+  try {
+    const updatedProject = await NovelAPI.updateBlueprint(project.id, { characters })
+    novelStore.setCurrentProject(updatedProject)
+    await loadSection('characters', true)
+  } catch (error) {
+    console.error('更新角色失败:', error)
+  }
+}
+
+const handleUpdateRelationships = async (relationships: any[]) => {
+  if (props.isAdmin) return
+  await ensureProjectLoaded()
+  const project = novel.value
+  if (!project) return
+
+  try {
+    const updatedProject = await NovelAPI.updateBlueprint(project.id, { relationships })
+    novelStore.setCurrentProject(updatedProject)
+    await loadSection('relationships', true)
+  } catch (error) {
+    console.error('更新关系失败:', error)
+  }
+}
+
+const handleUpdateOutline = async (chapter_outline: any[]) => {
+  if (props.isAdmin) return
+  await ensureProjectLoaded()
+  const project = novel.value
+  if (!project) return
+
+  try {
+    const updatedProject = await NovelAPI.updateBlueprint(project.id, { chapter_outline })
+    novelStore.setCurrentProject(updatedProject)
+    await loadSection('chapter_outline', true)
+  } catch (error) {
+    console.error('更新章节大纲失败:', error)
+  }
+}
+
+const handleUpdateWorldSetting = async (payload: { field: string; value: any[] }) => {
+  if (props.isAdmin) return
+  await ensureProjectLoaded()
+  const project = novel.value
+  if (!project) return
+
+  try {
+    const currentWorldSetting = project.blueprint?.world_setting || {}
+    const newWorldSetting = {
+      ...currentWorldSetting,
+      [payload.field]: payload.value
+    }
+    const updatedProject = await NovelAPI.updateBlueprint(project.id, { world_setting: newWorldSetting })
+    novelStore.setCurrentProject(updatedProject)
+    await loadSection('world_setting', true)
+  } catch (error) {
+    console.error('更新世界设定失败:', error)
+  }
+}
+
+const handleUpdateVolumes = async (volumes: any[]) => {
+  if (props.isAdmin) return
+  await ensureProjectLoaded()
+  const project = novel.value
+  if (!project) return
+
+  try {
+    const updatedProject = await NovelAPI.updateBlueprint(project.id, { volumes: { volumes } })
+    novelStore.setCurrentProject(updatedProject)
+    await loadSection('volumes', true)
+  } catch (error) {
+    console.error('更新卷结构失败:', error)
+  }
+}
+
+const handleUpdateForeshadowing = async (threads: any[]) => {
+  if (props.isAdmin) return
+  await ensureProjectLoaded()
+  const project = novel.value
+  if (!project) return
+
+  try {
+    const updatedProject = await NovelAPI.updateBlueprint(project.id, { foreshadowing: { threads } })
+    novelStore.setCurrentProject(updatedProject)
+    await loadSection('foreshadowing', true)
+  } catch (error) {
+    console.error('更新伏笔系统失败:', error)
+  }
 }
 
 const resolveSectionKey = (field: string): SectionKey => {
@@ -573,6 +713,25 @@ const saveNewChapter = async () => {
     console.error('新增章节失败:', error)
   }
 }
+
+// 监听 novelStore.currentProject 变化，刷新已加载的 section 数据
+// 这样当 GM Agent 应用操作后触发 refresh 时，section 数据会自动更新
+watch(
+  () => novelStore.currentProject,
+  async (newProject, oldProject) => {
+    // 只在非管理员模式且项目 ID 匹配时刷新
+    if (props.isAdmin || !newProject || newProject.id !== projectId) return
+    // 避免首次加载时重复请求
+    if (!oldProject) return
+
+    console.log('[NovelDetailShell] currentProject changed, refreshing sections')
+    // 刷新所有已加载的 section
+    const loadedSections = Object.keys(sectionData) as SectionKey[]
+    for (const section of loadedSections) {
+      loadSection(section, true)
+    }
+  }
+)
 
 onMounted(async () => {
   if (typeof window !== 'undefined') {

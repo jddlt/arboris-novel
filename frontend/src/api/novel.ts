@@ -3,7 +3,7 @@ import router from '@/router'
 
 // API 配置
 // 在生产环境中使用相对路径，在开发环境中使用绝对路径
-export const API_BASE_URL = import.meta.env.MODE === 'production' ? '' : 'http://127.0.0.1:8002'
+export const API_BASE_URL = import.meta.env.MODE === 'production' ? '' : 'http://127.0.0.1:8082'
 export const API_PREFIX = '/api'
 
 // 统一的请求处理函数
@@ -47,6 +47,7 @@ export interface NovelProject {
   initial_prompt: string
   blueprint?: Blueprint
   chapters: Chapter[]
+  volumes: Volume[]
   conversation_history: ConversationMessage[]
 }
 
@@ -87,6 +88,17 @@ export interface ChapterOutline {
   chapter_number: number
   title: string
   summary: string
+  volume_id?: number | null
+}
+
+export interface Volume {
+  id: number
+  volume_number: number
+  title: string
+  summary?: string | null
+  core_conflict?: string | null
+  climax?: string | null
+  status: string
 }
 
 export interface ChapterVersion {
@@ -98,6 +110,7 @@ export interface Chapter {
   chapter_number: number
   title: string
   summary: string
+  volume_id?: number | null
   content: string | null
   versions: string[] | null  // versions是字符串数组，不是对象数组
   evaluation: string | null
@@ -141,7 +154,7 @@ export interface DeleteNovelsResponse {
   message: string
 }
 
-export type NovelSectionType = 'overview' | 'world_setting' | 'characters' | 'relationships' | 'chapter_outline' | 'chapters'
+export type NovelSectionType = 'overview' | 'world_setting' | 'characters' | 'relationships' | 'volumes' | 'foreshadowing' | 'chapter_outline' | 'chapters'
 
 export interface NovelSectionResponse {
   section: NovelSectionType

@@ -7,7 +7,7 @@
         <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
           <path d="M10 2a6 6 0 00-6 6v3.586l-.707.707A1 1 0 004 14h12a1 1 0 00.707-1.707L16 11.586V8a6 6 0 00-6-6zm0 16a3 3 0 01-3-3h6a3 3 0 01-3 3z"/>
         </svg>
-        <span class="font-semibold">AI 助手</span>
+        <span class="font-semibold">剧本大师GM</span>
       </div>
       <div class="flex items-center gap-2">
         <!-- 清除当前对话按钮 -->
@@ -100,11 +100,29 @@
     <div ref="messageContainer" class="flex-1 overflow-y-auto p-4 space-y-4">
       <!-- 欢迎消息 -->
       <div v-if="messages.length === 0" class="text-center text-gray-500 py-8">
-        <svg class="w-12 h-12 mx-auto mb-4 text-gray-300" fill="currentColor" viewBox="0 0 20 20">
+        <svg class="w-16 h-16 mx-auto mb-4 text-indigo-300" fill="currentColor" viewBox="0 0 20 20">
           <path d="M10 2a6 6 0 00-6 6v3.586l-.707.707A1 1 0 004 14h12a1 1 0 00.707-1.707L16 11.586V8a6 6 0 00-6-6zm0 16a3 3 0 01-3-3h6a3 3 0 01-3 3z"/>
         </svg>
-        <p class="text-sm">你好！我是这本小说的 AI 助手。</p>
-        <p class="text-xs mt-1">我可以帮你管理角色、调整大纲、查看和修改章节内容。</p>
+        <p class="text-lg font-medium text-gray-700 mb-2">你好！我是剧本大师GM</p>
+        <p class="text-sm text-gray-500 mb-4">你的全能小说创作助手</p>
+        <div class="inline-flex flex-col items-start space-y-2 text-xs text-gray-400">
+          <div class="flex items-center gap-2">
+            <span class="w-1.5 h-1.5 bg-indigo-400 rounded-full flex-shrink-0"></span>
+            <span>角色、关系、世界观管理</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="w-1.5 h-1.5 bg-purple-400 rounded-full flex-shrink-0"></span>
+            <span>章节大纲规划与卷分配</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="w-1.5 h-1.5 bg-pink-400 rounded-full flex-shrink-0"></span>
+            <span>直接撰写或修改章节内容</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="w-1.5 h-1.5 bg-amber-400 rounded-full flex-shrink-0"></span>
+            <span>创意灵感与剧情建议</span>
+          </div>
+        </div>
       </div>
 
       <!-- 消息气泡 -->
@@ -121,13 +139,77 @@
               : 'bg-gray-100 text-gray-800 rounded-bl-md'
           ]"
         >
+          <!-- 只读工具调用记录（折叠显示，在消息内容上方） -->
+          <div v-if="msg.role !== 'user' && msg.readOnlyTools && msg.readOnlyTools.length > 0" class="mb-2">
+            <div
+              v-for="(tool, toolIdx) in msg.readOnlyTools"
+              :key="`${index}-${toolIdx}`"
+              class="mb-1.5 last:mb-0"
+            >
+              <!-- 折叠状态：只显示工具名和查询标签 -->
+              <button
+                @click="toggleReadOnlyTool(`${index}-${toolIdx}`)"
+                class="flex items-center gap-1.5 text-xs text-blue-600 hover:text-blue-700 transition-colors"
+              >
+                <svg
+                  class="w-3 h-3 transition-transform flex-shrink-0"
+                  :class="expandedReadOnlyTools.has(`${index}-${toolIdx}`) ? 'rotate-90' : ''"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                </svg>
+                <span class="font-medium">{{ getToolLabel(tool.name) }}</span>
+                <span class="px-1 py-0.5 bg-blue-100 text-blue-600 rounded text-[10px]">查询</span>
+              </button>
+              <!-- 展开状态：显示参数和结果 -->
+              <Transition
+                enter-active-class="transition-all duration-200 ease-out"
+                leave-active-class="transition-all duration-150 ease-in"
+                enter-from-class="opacity-0 max-h-0"
+                leave-to-class="opacity-0 max-h-0"
+                enter-to-class="opacity-100 max-h-96"
+                leave-from-class="opacity-100 max-h-96"
+              >
+                <div
+                  v-if="expandedReadOnlyTools.has(`${index}-${toolIdx}`)"
+                  class="mt-1.5 ml-4 text-xs bg-blue-50/70 rounded px-2 py-1.5 overflow-hidden"
+                >
+                  <!-- 参数 -->
+                  <div v-if="tool.params && Object.keys(tool.params).length > 0" class="space-y-0.5 mb-1.5">
+                    <div v-for="(value, key) in tool.params" :key="key" class="text-blue-700">
+                      <span class="text-blue-500">{{ formatParamKey(String(key)) }}:</span>
+                      <span class="ml-1">{{ formatParamValue(value) }}</span>
+                    </div>
+                  </div>
+                  <!-- 结果（可能很长，截断显示） -->
+                  <div class="text-gray-600 border-t border-blue-100 pt-1">
+                    <span class="text-blue-500">结果:</span>
+                    <span class="ml-1 whitespace-pre-wrap break-words">{{ tool.result.length > 200 ? tool.result.slice(0, 200) + '...' : tool.result }}</span>
+                  </div>
+                </div>
+              </Transition>
+            </div>
+          </div>
           <!-- 消息内容（支持 Markdown，长文本截断） -->
           <div
             v-if="msg.role === 'user'"
             class="whitespace-pre-wrap break-words"
           >{{ isLongContent(msg.content) ? truncateContent(msg.content) : msg.content }}</div>
+          <!-- 用户消息中的图片（显示在文字下方） -->
+          <div v-if="msg.role === 'user' && msg.images && msg.images.length > 0" class="flex gap-2 mt-2 flex-wrap">
+            <img
+              v-for="(img, imgIdx) in msg.images"
+              :key="imgIdx"
+              :src="img.preview"
+              @click="showImagePreview(img.preview)"
+              class="w-20 h-20 object-cover rounded-lg border border-indigo-300 cursor-pointer hover:opacity-80 transition-opacity"
+              alt="发送的图片"
+            />
+          </div>
           <div
-            v-else
+            v-if="msg.role !== 'user'"
             class="prose prose-sm max-w-none prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-pre:my-2 prose-code:px-1 prose-code:py-0.5 prose-code:bg-gray-200 prose-code:rounded prose-code:text-xs"
             v-html="renderMarkdown(isLongContent(msg.content) ? truncateContent(msg.content) : msg.content)"
           ></div>
@@ -141,6 +223,23 @@
           >
             查看全文（{{ msg.content.length }} 字）
           </button>
+
+          <!-- 重发按钮（仅 assistant 消息显示） -->
+          <div
+            v-if="msg.role === 'assistant' && !isLoading && !isStreaming"
+            class="flex items-center gap-2 mt-2 pt-1"
+          >
+            <button
+              @click="regenerateMessage(index)"
+              class="flex items-center gap-1 text-xs text-gray-400 hover:text-indigo-600 transition-colors"
+              title="重新生成回复"
+            >
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+              </svg>
+              <span>重发</span>
+            </button>
+          </div>
 
           <!-- 待执行操作 -->
           <div v-if="msg.actions && msg.actions.length > 0" class="mt-3 space-y-2">
@@ -258,6 +357,34 @@
         </div>
       </div>
 
+      <!-- 正在执行只读工具 -->
+      <div v-if="executingTool" class="flex justify-start">
+        <div class="max-w-[85%] rounded-2xl rounded-bl-md px-4 py-3 bg-blue-50 border border-blue-200 text-sm">
+          <div class="flex items-center gap-2 text-blue-700 mb-2">
+            <div class="w-4 h-4 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin"></div>
+            <span class="font-medium">{{ getToolLabel(executingTool.name) }}</span>
+            <span class="text-blue-500 text-xs">查询中...</span>
+          </div>
+          <!-- 展示工具参数 -->
+          <div v-if="executingTool.params && Object.keys(executingTool.params).length > 0" class="text-xs text-blue-600 bg-blue-100/50 rounded px-2 py-1.5 space-y-0.5">
+            <div v-for="(value, key) in executingTool.params" :key="key">
+              <span class="text-blue-500">{{ formatParamKey(String(key)) }}:</span>
+              <span class="ml-1">{{ formatParamValue(value) }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 等待确认提示 -->
+      <div v-if="awaitingContinue && !isLoading && !isStreaming" class="flex justify-center">
+        <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2 text-sm text-amber-700 flex items-center gap-2">
+          <svg class="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
+          </svg>
+          <span>请确认上方操作后，助手将根据执行结果继续</span>
+        </div>
+      </div>
+
       <!-- 加载中（等待回复或流式输出还没内容时） -->
       <div v-if="isLoading && !streamingContent" class="flex justify-start">
         <div class="bg-gray-100 rounded-2xl rounded-bl-md px-4 py-3">
@@ -272,19 +399,43 @@
 
     <!-- 输入框 -->
     <div class="p-3 border-t border-gray-200 flex-shrink-0">
+      <!-- 图片预览区 -->
+      <div v-if="pastedImages.length > 0" class="flex gap-2 mb-2 flex-wrap">
+        <div
+          v-for="(img, index) in pastedImages"
+          :key="index"
+          class="relative group"
+        >
+          <img
+            :src="img.preview"
+            class="w-16 h-16 object-cover rounded-lg border border-gray-200"
+            alt="待发送图片"
+          />
+          <button
+            @click="removeImage(index)"
+            class="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-xs"
+          >
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+        <div class="text-xs text-gray-400 self-end">Ctrl+V 粘贴图片（最多4张）</div>
+      </div>
       <div class="flex gap-2 items-start">
         <textarea
           v-model="inputMessage"
           @keydown.enter.exact.prevent="sendMessage"
+          @paste="handlePaste"
           :disabled="isLoading"
-          placeholder="输入消息..."
+          placeholder="输入消息，可粘贴图片..."
           rows="3"
           class="flex-1 px-3 py-2 border border-gray-300 rounded-lg resize-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:bg-gray-100 text-sm"
         ></textarea>
         <div class="flex flex-col items-center gap-2">
           <button
             @click="sendMessage"
-            :disabled="!inputMessage.trim() || isLoading"
+            :disabled="(!inputMessage.trim() && pastedImages.length === 0) || isLoading"
             class="px-4 py-3 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
@@ -339,6 +490,34 @@
       </div>
     </Transition>
   </Teleport>
+
+  <!-- 图片预览 Modal -->
+  <Teleport to="body">
+    <Transition
+      enter-active-class="transition-opacity duration-200"
+      leave-active-class="transition-opacity duration-200"
+      enter-from-class="opacity-0"
+      leave-to-class="opacity-0"
+    >
+      <div v-if="imagePreviewModal.show" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-[70] flex items-center justify-center p-4" @click.self="closeImagePreview">
+        <div class="relative max-w-[90vw] max-h-[90vh]">
+          <img
+            :src="imagePreviewModal.src"
+            class="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl"
+            alt="图片预览"
+          />
+          <button
+            @click="closeImagePreview"
+            class="absolute -top-3 -right-3 w-8 h-8 bg-white text-gray-600 rounded-full flex items-center justify-center shadow-lg hover:bg-gray-100 transition-colors"
+          >
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
@@ -346,6 +525,7 @@ import { ref, computed, nextTick, watch, onMounted } from 'vue'
 import { marked } from 'marked'
 import {
   streamChatWithGM,
+  continueChatWithGM,
   applyActions,
   discardActions,
   getConversations,
@@ -354,6 +534,7 @@ import {
   type GMPendingAction,
   type ConversationMessage,
   type ConversationSummary,
+  type ActionResult,
 } from '@/api/gm'
 
 // 配置 marked
@@ -384,8 +565,19 @@ const emit = defineEmits<{
 const STORAGE_KEY_PREFIX = 'gm_agent_chat_'
 const getStorageKey = () => `${STORAGE_KEY_PREFIX}${props.projectId}`
 
+// 图片数据接口
+interface ImageData {
+  base64: string
+  mimeType: string
+  preview: string // 用于预览的 data URL
+}
+
 // 状态
-const messages = ref<(ConversationMessage & { actions?: GMPendingAction[] })[]>([])
+const messages = ref<(ConversationMessage & {
+  actions?: GMPendingAction[];
+  images?: ImageData[];
+  readOnlyTools?: { name: string; params: Record<string, unknown>; result: string }[];
+})[]>([])
 const inputMessage = ref('')
 const isLoading = ref(false)
 const isStreaming = ref(false)
@@ -395,6 +587,7 @@ const expandedActions = ref<Set<string>>(new Set())
 const conversationId = ref<string | null>(null)
 const enableWebSearch = ref(false)
 const messageContainer = ref<HTMLElement | null>(null)
+const pastedImages = ref<ImageData[]>([]) // 待发送的粘贴图片
 
 // 历史对话列表状态
 const showHistoryPanel = ref(false)
@@ -406,6 +599,24 @@ const fullContentModal = ref<{ show: boolean; content: string }>({
   show: false,
   content: '',
 })
+
+// 图片预览 Modal 状态
+const imagePreviewModal = ref<{ show: boolean; src: string }>({
+  show: false,
+  src: '',
+})
+
+// Agent 是否在等待确认后继续
+const awaitingContinue = ref(false)
+
+// 当前正在执行的只读工具信息
+const executingTool = ref<{ name: string; params: Record<string, unknown> } | null>(null)
+
+// 已执行的只读工具调用列表（当前轮对话中）
+const executedReadOnlyTools = ref<{ name: string; params: Record<string, unknown>; result: string }[]>([])
+
+// 展开的只读工具ID集合（按消息索引+工具索引组合）
+const expandedReadOnlyTools = ref<Set<string>>(new Set())
 
 // 长文本阈值（字符数）
 const LONG_CONTENT_THRESHOLD = 500
@@ -469,6 +680,16 @@ function closeFullContent() {
   fullContentModal.value = { show: false, content: '' }
 }
 
+// 显示图片预览
+function showImagePreview(src: string) {
+  imagePreviewModal.value = { show: true, src }
+}
+
+// 关闭图片预览
+function closeImagePreview() {
+  imagePreviewModal.value = { show: false, src: '' }
+}
+
 // 工具标签映射
 const toolLabels: Record<string, string> = {
   update_blueprint: '修改设定',
@@ -484,7 +705,10 @@ const toolLabels: Record<string, string> = {
   reorder_outlines: '调整顺序',
   search_content: '搜索内容',
   get_chapter_content: '获取章节',
+  get_chapter_versions: '获取版本',
   update_chapter_content: '修改章节',
+  clear_chapter_content: '清空章节',
+  generate_chapter_content: '生成章节',
 }
 
 // 计算待执行操作数量
@@ -545,10 +769,14 @@ const paramKeyLabels: Record<string, string> = {
   content: '内容',
   summary: '摘要',
   chapter_number: '章节号',
+  chapter_numbers: '章节号列表',
   from_character: '角色A',
   to_character: '角色B',
   description: '描述',
   relation_type: '关系类型',
+  include_full_content: '包含完整内容',
+  new_content: '新内容',
+  modification_reason: '修改原因',
 }
 
 // 格式化参数键名
@@ -578,6 +806,15 @@ function toggleActionDetails(actionId: string) {
   }
 }
 
+// 切换只读工具展开状态
+function toggleReadOnlyTool(toolKey: string) {
+  if (expandedReadOnlyTools.value.has(toolKey)) {
+    expandedReadOnlyTools.value.delete(toolKey)
+  } else {
+    expandedReadOnlyTools.value.add(toolKey)
+  }
+}
+
 // 滚动到底部
 function scrollToBottom() {
   nextTick(() => {
@@ -587,50 +824,137 @@ function scrollToBottom() {
   })
 }
 
+// 处理粘贴事件（支持图片粘贴）
+function handlePaste(event: ClipboardEvent) {
+  const items = event.clipboardData?.items
+  if (!items) return
+
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      event.preventDefault() // 阻止默认粘贴行为
+      const file = item.getAsFile()
+      if (!file) continue
+
+      // 限制图片数量
+      if (pastedImages.value.length >= 4) {
+        console.warn('最多只能添加4张图片')
+        return
+      }
+
+      // 读取图片并转换为 base64
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        const dataUrl = e.target?.result as string
+        if (!dataUrl) return
+
+        // 解析 data URL：data:image/png;base64,xxxxx
+        const matches = dataUrl.match(/^data:(image\/[^;]+);base64,(.+)$/)
+        if (matches) {
+          pastedImages.value.push({
+            mimeType: matches[1],
+            base64: matches[2],
+            preview: dataUrl,
+          })
+        }
+      }
+      reader.readAsDataURL(file)
+    }
+  }
+}
+
+// 移除待发送的图片
+function removeImage(index: number) {
+  pastedImages.value.splice(index, 1)
+}
+
 // 发送消息
 async function sendMessage() {
   const content = inputMessage.value.trim()
-  if (!content || isLoading.value) return
+  const imagesToSend = [...pastedImages.value] // 复制当前图片列表
+  if ((!content && imagesToSend.length === 0) || isLoading.value) return
 
   inputMessage.value = ''
+  pastedImages.value = [] // 清空待发送图片
   isLoading.value = true
   isStreaming.value = true
   streamingContent.value = ''
+  awaitingContinue.value = false
 
-  // 添加用户消息
-  messages.value.push({ role: 'user', content })
+  // 添加用户消息（包含图片）
+  messages.value.push({
+    role: 'user',
+    content,
+    images: imagesToSend.length > 0 ? imagesToSend : undefined,
+  })
   scrollToBottom()
 
   try {
     let pendingActions: GMPendingAction[] = []
     let finalContent = ''
+    // 清空上一轮的只读工具记录
+    executedReadOnlyTools.value = []
+
+    // 构造发送给 API 的图片数据（只需要 base64 和 mimeType）
+    const apiImages = imagesToSend.map(img => ({
+      base64: img.base64,
+      mime_type: img.mimeType,
+    }))
+
+    // 临时保存当前执行中的工具信息
+    let currentExecutingTool: { name: string; params: Record<string, unknown> } | null = null
 
     for await (const event of streamChatWithGM(props.projectId, content, {
       conversationId: conversationId.value || undefined,
       enableWebSearch: enableWebSearch.value,
+      images: apiImages.length > 0 ? apiImages : undefined,
     })) {
       if (event.type === 'start') {
         conversationId.value = event.conversation_id
       } else if (event.type === 'content') {
         streamingContent.value += event.content
         scrollToBottom()
+      } else if (event.type === 'tool_executing') {
+        // 正在执行只读工具
+        currentExecutingTool = { name: event.tool_name, params: event.params }
+        executingTool.value = currentExecutingTool
+        scrollToBottom()
+      } else if (event.type === 'tool_result') {
+        // 只读工具执行完成，保存到已执行列表
+        if (currentExecutingTool) {
+          executedReadOnlyTools.value.push({
+            name: currentExecutingTool.name,
+            params: currentExecutingTool.params,
+            result: event.result,
+          })
+        }
+        executingTool.value = null
+        currentExecutingTool = null
+        scrollToBottom()
       } else if (event.type === 'pending_actions') {
         pendingActions = event.actions
       } else if (event.type === 'done') {
         finalContent = event.message
+        // 检查是否需要在应用后继续
+        if (event.awaiting_confirmation) {
+          awaitingContinue.value = true
+        }
       } else if (event.type === 'error') {
         throw new Error(event.error)
       }
     }
 
     isStreaming.value = false
+    executingTool.value = null
 
-    // 添加助手消息
+    // 添加助手消息（包含只读工具调用记录）
     messages.value.push({
       role: 'assistant',
       content: finalContent || streamingContent.value,
       actions: pendingActions,
+      readOnlyTools: executedReadOnlyTools.value.length > 0 ? [...executedReadOnlyTools.value] : undefined,
     })
+    // 清空临时记录
+    executedReadOnlyTools.value = []
     scrollToBottom()
   } catch (error) {
     isStreaming.value = false
@@ -648,7 +972,8 @@ async function sendMessage() {
 
 // 应用单个操作
 async function applyAction(actionId: string) {
-  if (isApplying.value) return
+  // 防止重复提交和与 continue 操作冲突
+  if (isApplying.value || isLoading.value) return
   isApplying.value = true
 
   try {
@@ -668,6 +993,11 @@ async function applyAction(actionId: string) {
 
     // 通知刷新数据
     emit('refresh')
+
+    // 如果 Agent 还在等待继续，自动继续对话并传递执行结果
+    if (awaitingContinue.value && conversationId.value) {
+      await continueAfterApply(result.results)
+    }
   } catch (error) {
     console.error('应用操作失败:', error)
   } finally {
@@ -675,9 +1005,90 @@ async function applyAction(actionId: string) {
   }
 }
 
+// 在应用操作后继续对话
+async function continueAfterApply(actionResults: ActionResult[]) {
+  if (!conversationId.value || isLoading.value) return
+
+  isLoading.value = true
+  isStreaming.value = true
+  streamingContent.value = ''
+  // 清空上一轮的只读工具记录
+  executedReadOnlyTools.value = []
+
+  try {
+    let pendingActions: GMPendingAction[] = []
+    let finalContent = ''
+    // 临时保存当前执行中的工具信息
+    let currentExecutingTool: { name: string; params: Record<string, unknown> } | null = null
+
+    for await (const event of continueChatWithGM(
+      props.projectId,
+      conversationId.value,
+      actionResults,
+      { enableWebSearch: enableWebSearch.value }
+    )) {
+      if (event.type === 'content') {
+        streamingContent.value += event.content
+        scrollToBottom()
+      } else if (event.type === 'tool_executing') {
+        currentExecutingTool = { name: event.tool_name, params: event.params }
+        executingTool.value = currentExecutingTool
+        scrollToBottom()
+      } else if (event.type === 'tool_result') {
+        // 只读工具执行完成，保存到已执行列表
+        if (currentExecutingTool) {
+          executedReadOnlyTools.value.push({
+            name: currentExecutingTool.name,
+            params: currentExecutingTool.params,
+            result: event.result,
+          })
+        }
+        executingTool.value = null
+        currentExecutingTool = null
+        scrollToBottom()
+      } else if (event.type === 'pending_actions') {
+        pendingActions = event.actions
+      } else if (event.type === 'done') {
+        finalContent = event.message
+        awaitingContinue.value = !!event.awaiting_confirmation
+      } else if (event.type === 'error') {
+        throw new Error(event.error)
+      }
+    }
+
+    isStreaming.value = false
+    executingTool.value = null
+
+    // 添加助手消息（包含只读工具调用记录）
+    if (finalContent || streamingContent.value) {
+      messages.value.push({
+        role: 'assistant',
+        content: finalContent || streamingContent.value,
+        actions: pendingActions,
+        readOnlyTools: executedReadOnlyTools.value.length > 0 ? [...executedReadOnlyTools.value] : undefined,
+      })
+      // 清空临时记录
+      executedReadOnlyTools.value = []
+      scrollToBottom()
+    }
+  } catch (error) {
+    isStreaming.value = false
+    executingTool.value = null
+    const errorMessage = error instanceof Error ? error.message : '继续对话失败'
+    messages.value.push({
+      role: 'assistant',
+      content: `抱歉，发生了错误：${errorMessage}`,
+    })
+    scrollToBottom()
+  } finally {
+    isLoading.value = false
+    streamingContent.value = ''
+  }
+}
+
 // 放弃单个操作
 async function discardAction(actionId: string) {
-  if (isApplying.value) return
+  if (isApplying.value || isLoading.value) return
   isApplying.value = true
 
   try {
@@ -703,7 +1114,7 @@ async function discardAction(actionId: string) {
 // 应用指定消息的所有待执行操作
 async function applyMessageActions(msgIndex: number) {
   const msg = messages.value[msgIndex]
-  if (!msg?.actions || isApplying.value) return
+  if (!msg?.actions || isApplying.value || isLoading.value) return
 
   const pendingIds = msg.actions
     .filter(a => a.status === 'pending')
@@ -723,6 +1134,11 @@ async function applyMessageActions(msgIndex: number) {
     }
 
     emit('refresh')
+
+    // 如果 Agent 还在等待继续，自动继续对话并传递执行结果
+    if (awaitingContinue.value && conversationId.value) {
+      await continueAfterApply(result.results)
+    }
   } catch (error) {
     console.error('批量应用失败:', error)
   } finally {
@@ -733,7 +1149,7 @@ async function applyMessageActions(msgIndex: number) {
 // 放弃指定消息的所有待执行操作
 async function discardMessageActions(msgIndex: number) {
   const msg = messages.value[msgIndex]
-  if (!msg?.actions || isApplying.value) return
+  if (!msg?.actions || isApplying.value || isLoading.value) return
 
   const pendingIds = msg.actions
     .filter(a => a.status === 'pending')
@@ -759,6 +1175,9 @@ async function discardMessageActions(msgIndex: number) {
 
 // 应用所有待执行操作
 async function applyAllPending() {
+  // 防止与 continue 操作冲突
+  if (isApplying.value || isLoading.value) return
+
   const pendingIds: string[] = []
   for (const msg of messages.value) {
     if (msg.actions) {
@@ -789,6 +1208,11 @@ async function applyAllPending() {
     }
 
     emit('refresh')
+
+    // 如果 Agent 还在等待继续，自动继续对话并传递执行结果
+    if (awaitingContinue.value && conversationId.value) {
+      await continueAfterApply(result.results)
+    }
   } catch (error) {
     console.error('批量应用失败:', error)
   } finally {
@@ -798,6 +1222,8 @@ async function applyAllPending() {
 
 // 放弃所有待执行操作
 async function discardAllPending() {
+  if (isApplying.value || isLoading.value) return
+
   const pendingIds: string[] = []
   for (const msg of messages.value) {
     if (msg.actions) {
@@ -828,6 +1254,111 @@ async function discardAllPending() {
     console.error('批量放弃失败:', error)
   } finally {
     isApplying.value = false
+  }
+}
+
+// 重发消息（重新生成 assistant 回复）
+async function regenerateMessage(assistantMsgIndex: number) {
+  if (isLoading.value || isStreaming.value) return
+
+  // 找到该 assistant 消息前面的 user 消息
+  let userMsgIndex = -1
+  for (let i = assistantMsgIndex - 1; i >= 0; i--) {
+    if (messages.value[i].role === 'user') {
+      userMsgIndex = i
+      break
+    }
+  }
+
+  if (userMsgIndex === -1) {
+    console.error('未找到对应的用户消息')
+    return
+  }
+
+  const userMsg = messages.value[userMsgIndex]
+  const userContent = userMsg.content
+  const userImages = userMsg.images ? [...userMsg.images] : []
+
+  // 删除从 assistant 消息开始的所有后续消息（保留用户消息）
+  messages.value = messages.value.slice(0, assistantMsgIndex)
+
+  // 重新发送请求
+  isLoading.value = true
+  isStreaming.value = true
+  streamingContent.value = ''
+  awaitingContinue.value = false
+  executedReadOnlyTools.value = []
+
+  try {
+    let pendingActions: GMPendingAction[] = []
+    let finalContent = ''
+
+    const apiImages = userImages.map(img => ({
+      base64: img.base64,
+      mime_type: img.mimeType,
+    }))
+
+    let currentExecutingTool: { name: string; params: Record<string, unknown> } | null = null
+
+    for await (const event of streamChatWithGM(props.projectId, userContent, {
+      conversationId: conversationId.value || undefined,
+      enableWebSearch: enableWebSearch.value,
+      images: apiImages.length > 0 ? apiImages : undefined,
+    })) {
+      if (event.type === 'start') {
+        conversationId.value = event.conversation_id
+      } else if (event.type === 'content') {
+        streamingContent.value += event.content
+        scrollToBottom()
+      } else if (event.type === 'tool_executing') {
+        currentExecutingTool = { name: event.tool_name, params: event.params }
+        executingTool.value = currentExecutingTool
+        scrollToBottom()
+      } else if (event.type === 'tool_result') {
+        if (currentExecutingTool) {
+          executedReadOnlyTools.value.push({
+            name: currentExecutingTool.name,
+            params: currentExecutingTool.params,
+            result: event.result,
+          })
+        }
+        executingTool.value = null
+        currentExecutingTool = null
+        scrollToBottom()
+      } else if (event.type === 'pending_actions') {
+        pendingActions = event.actions
+      } else if (event.type === 'done') {
+        finalContent = event.message
+        if (event.awaiting_confirmation) {
+          awaitingContinue.value = true
+        }
+      } else if (event.type === 'error') {
+        throw new Error(event.error)
+      }
+    }
+
+    isStreaming.value = false
+    executingTool.value = null
+
+    messages.value.push({
+      role: 'assistant',
+      content: finalContent || streamingContent.value,
+      actions: pendingActions,
+      readOnlyTools: executedReadOnlyTools.value.length > 0 ? [...executedReadOnlyTools.value] : undefined,
+    })
+    executedReadOnlyTools.value = []
+    scrollToBottom()
+  } catch (error) {
+    isStreaming.value = false
+    const errorMessage = error instanceof Error ? error.message : '重新生成失败'
+    messages.value.push({
+      role: 'assistant',
+      content: `抱歉，发生了错误：${errorMessage}`,
+    })
+    scrollToBottom()
+  } finally {
+    isLoading.value = false
+    streamingContent.value = ''
   }
 }
 

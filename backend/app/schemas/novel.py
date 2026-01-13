@@ -51,6 +51,7 @@ class ChapterOutline(BaseModel):
     chapter_number: int
     title: str
     summary: str
+    volume_id: Optional[int] = None
 
 
 class Chapter(ChapterOutline):
@@ -59,12 +60,28 @@ class Chapter(ChapterOutline):
     versions: Optional[List[str]] = None
     evaluation: Optional[str] = None
     generation_status: ChapterGenerationStatus = ChapterGenerationStatus.NOT_GENERATED
+    word_count: int = 0
 
 
 class Relationship(BaseModel):
     character_from: str
     character_to: str
     description: str
+
+
+class VolumeSchema(BaseModel):
+    """卷结构数据。"""
+
+    id: int
+    volume_number: int
+    title: str
+    summary: Optional[str] = None
+    core_conflict: Optional[str] = None
+    climax: Optional[str] = None
+    status: str = "planned"
+
+    class Config:
+        from_attributes = True
 
 
 class Blueprint(BaseModel):
@@ -76,10 +93,12 @@ class Blueprint(BaseModel):
     one_sentence_summary: str = ""
     full_synopsis: str = ""
     world_setting: Dict[str, Any] = {}
+    volumes: Dict[str, Any] = {}
+    foreshadowing: Dict[str, Any] = {}
     characters: List[Dict[str, Any]] = []
     relationships: List[Relationship] = []
     chapter_outline: List[ChapterOutline] = []
-    
+
     class Config:
         from_attributes = True
 
@@ -92,6 +111,7 @@ class NovelProject(BaseModel):
     conversation_history: List[Dict[str, Any]] = []
     blueprint: Optional[Blueprint] = None
     chapters: List[Chapter] = []
+    volumes: List[VolumeSchema] = []
 
     class Config:
         from_attributes = True
@@ -123,6 +143,8 @@ class NovelSectionType(str, Enum):
     RELATIONSHIPS = "relationships"
     CHAPTER_OUTLINE = "chapter_outline"
     CHAPTERS = "chapters"
+    VOLUMES = "volumes"
+    FORESHADOWING = "foreshadowing"
 
 
 class NovelSectionResponse(BaseModel):
@@ -163,6 +185,8 @@ class BlueprintPatch(BaseModel):
     one_sentence_summary: Optional[str] = None
     full_synopsis: Optional[str] = None
     world_setting: Optional[Dict[str, Any]] = None
+    volumes: Optional[Dict[str, Any]] = None
+    foreshadowing: Optional[Dict[str, Any]] = None
     characters: Optional[List[Dict[str, Any]]] = None
     relationships: Optional[List[Relationship]] = None
     chapter_outline: Optional[List[ChapterOutline]] = None

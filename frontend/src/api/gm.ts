@@ -73,12 +73,20 @@ export interface ConversationDetail {
   updated_at: string
 }
 
+/** 图片数据（用于 API 请求） */
+export interface ImagePayload {
+  base64: string
+  mime_type: string
+}
+
 /** SSE 事件类型 */
 export type GMStreamEvent =
   | { type: 'start'; conversation_id: string }
   | { type: 'content'; content: string }
-  | { type: 'pending_actions'; actions: GMPendingAction[] }
-  | { type: 'done'; conversation_id: string; message: string }
+  | { type: 'tool_executing'; tool_name: string; params: Record<string, unknown> }
+  | { type: 'tool_result'; tool_name: string; result: string }
+  | { type: 'pending_actions'; actions: GMPendingAction[]; has_more?: boolean }
+  | { type: 'done'; conversation_id: string; message: string; awaiting_confirmation?: boolean }
   | { type: 'error'; error: string }
 
 // ==================== 请求工具函数 ====================
@@ -146,6 +154,7 @@ export async function* streamChatWithGM(
   options?: {
     conversationId?: string
     enableWebSearch?: boolean
+    images?: ImagePayload[]
   }
 ): AsyncGenerator<GMStreamEvent> {
   const authStore = useAuthStore()
@@ -159,6 +168,7 @@ export async function* streamChatWithGM(
         message,
         conversation_id: options?.conversationId,
         enable_web_search: options?.enableWebSearch ?? false,
+        images: options?.images,
       }),
     }
   )
@@ -223,6 +233,82 @@ export async function applyActions(
     }
   )
   return handleResponse(response)
+}
+
+/**
+ * 继续对话（在应用操作后）
+ * @param actionResults 操作执行结果列表
+ * @returns AsyncGenerator 产生 SSE 事件
+ */
+export async function* continueChatWithGM(
+  projectId: string,
+  conversationId: string,
+  actionResults: ActionResult[],
+  options?: {
+    enableWebSearch?: boolean
+  }
+): AsyncGenerator<GMStreamEvent> {
+  const authStore = useAuthStore()
+
+  const response = await fetch(
+    `${API_BASE_URL}${API_PREFIX}/novels/${projectId}/gm/chat/continue`,
+    {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({
+        conversation_id: conversationId,
+        action_results: actionResults.map(r => ({
+          action_id: r.action_id,
+          success: r.success,
+          message: r.message,
+        })),
+        enable_web_search: options?.enableWebSearch ?? false,
+      }),
+    }
+  )
+
+  if (response.status === 401) {
+    authStore.logout()
+    router.push('/login')
+    throw new Error('会话已过期，请重新登录')
+  }
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}))
+    throw new Error(errorData.detail || `请求失败，状态码: ${response.status}`)
+  }
+
+  const reader = response.body?.getReader()
+  if (!reader) {
+    throw new Error('无法获取响应流')
+  }
+
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(line.slice(6))
+            yield data as GMStreamEvent
+          } catch {
+            // 忽略解析错误
+          }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock()
+  }
 }
 
 /**

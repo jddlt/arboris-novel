@@ -53,6 +53,11 @@ class BaseToolExecutor(ABC):
     所有 GM Agent 工具必须继承此类并实现抽象方法。
     通过 @ToolRegistry.register 装饰器自动注册到工具注册表。
 
+    Attributes:
+        is_read_only: 类属性，标识工具是否为只读查询类工具。
+            只读工具会在 Agent 思考过程中自动执行，结果反馈给 LLM。
+            非只读工具需要用户确认后才执行。
+
     Example:
         ```python
         @ToolRegistry.register
@@ -75,8 +80,18 @@ class BaseToolExecutor(ABC):
             async def execute(self, project_id: str, params: Dict[str, Any]) -> ToolResult:
                 # 执行逻辑
                 ...
+
+        @ToolRegistry.register
+        class GetChapterContentExecutor(BaseToolExecutor):
+            is_read_only = True  # 查询类工具，自动执行
+            ...
         ```
     """
+
+    # 是否为只读查询工具，子类可覆盖
+    # True: 自动执行，结果反馈给 LLM 继续思考
+    # False: 需要用户确认后执行
+    is_read_only: bool = False
 
     def __init__(self, session: "AsyncSession"):
         """初始化执行器。

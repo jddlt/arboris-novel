@@ -32,12 +32,12 @@
           <button
             @click="$emit('toggleGMAgent')"
             class="p-2 sm:px-3 sm:py-2 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded-lg transition-colors flex items-center gap-2"
-            title="AI 助手"
+            title="剧本大师GM"
           >
             <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
               <path d="M10 2a6 6 0 00-6 6v3.586l-.707.707A1 1 0 004 14h12a1 1 0 00.707-1.707L16 11.586V8a6 6 0 00-6-6zm0 16a3 3 0 01-3-3h6a3 3 0 01-3 3z"/>
             </svg>
-            <span class="hidden md:inline text-sm font-medium">AI 助手</span>
+            <span class="hidden md:inline text-sm font-medium">剧本大师</span>
           </button>
           <div class="w-px h-6 bg-gray-300 hidden sm:block"></div>
           <button

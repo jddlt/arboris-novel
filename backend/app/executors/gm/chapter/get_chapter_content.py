@@ -21,6 +21,9 @@ class GetChapterContentExecutor(BaseToolExecutor):
     支持获取单个或多个章节的完整正文，用于分析、对比和修改。
     """
 
+    # 查询类工具，自动执行
+    is_read_only = True
+
     @classmethod
     def get_name(cls) -> str:
         return "get_chapter_content"
@@ -95,9 +98,12 @@ class GetChapterContentExecutor(BaseToolExecutor):
                 not_found.append(num)
                 continue
 
-            if not chapter.content:
+            # 内容存储在 selected_version 中
+            if not chapter.selected_version or not chapter.selected_version.content:
                 no_content.append(num)
                 continue
+
+            content = chapter.selected_version.content
 
             # 获取大纲信息
             outline = next(
@@ -109,8 +115,8 @@ class GetChapterContentExecutor(BaseToolExecutor):
                 "chapter_number": num,
                 "title": outline.title if outline else f"第{num}章",
                 "outline_summary": outline.summary if outline else None,
-                "content": chapter.content,
-                "word_count": len(chapter.content),
+                "content": content,
+                "word_count": len(content),
                 "status": chapter.status,
             })
 

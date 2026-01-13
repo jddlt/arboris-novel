@@ -55,6 +55,9 @@ class NovelProject(Base):
     outlines: Mapped[list["ChapterOutline"]] = relationship(
         back_populates="project", cascade="all, delete-orphan", order_by="ChapterOutline.chapter_number"
     )
+    volumes: Mapped[list["Volume"]] = relationship(
+        back_populates="project", cascade="all, delete-orphan", order_by="Volume.volume_number"
+    )
     chapters: Mapped[list["Chapter"]] = relationship(
         back_populates="project", cascade="all, delete-orphan", order_by="Chapter.chapter_number"
     )
@@ -99,6 +102,10 @@ class NovelBlueprint(Base):
     one_sentence_summary: Mapped[Optional[str]] = mapped_column(Text)
     full_synopsis: Mapped[Optional[str]] = mapped_column(LONG_TEXT_TYPE)
     world_setting: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
+    # 卷结构：管理长篇小说的卷/篇章划分
+    volumes: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
+    # 伏笔系统：追踪伏笔的埋设与回收
+    foreshadowing: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -139,6 +146,26 @@ class BlueprintRelationship(Base):
     project: Mapped[NovelProject] = relationship(back_populates="relationships_")
 
 
+class Volume(Base):
+    """卷/篇章结构，用于管理长篇小说的分卷。"""
+
+    __tablename__ = "volumes"
+
+    id: Mapped[int] = mapped_column(BIGINT_PK_TYPE, primary_key=True, autoincrement=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("novel_projects.id", ondelete="CASCADE"), nullable=False)
+    volume_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    summary: Mapped[Optional[str]] = mapped_column(Text)
+    core_conflict: Mapped[Optional[str]] = mapped_column(Text)
+    climax: Mapped[Optional[str]] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(32), default="planned")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    project: Mapped[NovelProject] = relationship(back_populates="volumes")
+    outlines: Mapped[list["ChapterOutline"]] = relationship(back_populates="volume", order_by="ChapterOutline.chapter_number")
+
+
 class ChapterOutline(Base):
     """章节纲要。"""
 
@@ -149,8 +176,10 @@ class ChapterOutline(Base):
     chapter_number: Mapped[int] = mapped_column(Integer, nullable=False)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     summary: Mapped[Optional[str]] = mapped_column(Text)
+    volume_id: Mapped[Optional[int]] = mapped_column(ForeignKey("volumes.id", ondelete="SET NULL"), nullable=True)
 
     project: Mapped[NovelProject] = relationship(back_populates="outlines")
+    volume: Mapped[Optional["Volume"]] = relationship(back_populates="outlines")
 
 
 class Chapter(Base):

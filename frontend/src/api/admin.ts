@@ -3,7 +3,7 @@ import router from '@/router'
 import type { NovelSectionResponse, NovelSectionType } from '@/api/novel'
 
 // API 配置
-export const API_BASE_URL = import.meta.env.MODE === 'production' ? '' : 'http://127.0.0.1:8002'
+export const API_BASE_URL = import.meta.env.MODE === 'production' ? '' : 'http://127.0.0.1:8082'
 export const ADMIN_API_PREFIX = '/api/admin'
 
 // 统一请求封装

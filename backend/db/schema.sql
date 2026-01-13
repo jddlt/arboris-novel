@@ -75,13 +75,30 @@ CREATE TABLE IF NOT EXISTS blueprint_relationships (
     CONSTRAINT fk_relationships_project FOREIGN KEY (project_id) REFERENCES novel_projects(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS volumes (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    project_id CHAR(36) NOT NULL,
+    volume_number INT NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    summary TEXT NULL,
+    core_conflict TEXT NULL,
+    climax TEXT NULL,
+    status VARCHAR(32) DEFAULT 'planned',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_volumes_project FOREIGN KEY (project_id) REFERENCES novel_projects(id) ON DELETE CASCADE,
+    UNIQUE KEY uq_volume_project_number (project_id, volume_number)
+);
+
 CREATE TABLE IF NOT EXISTS chapter_outlines (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     project_id CHAR(36) NOT NULL,
     chapter_number INT NOT NULL,
     title VARCHAR(255) NOT NULL,
     summary TEXT NULL,
+    volume_id BIGINT NULL,
     CONSTRAINT fk_outlines_project FOREIGN KEY (project_id) REFERENCES novel_projects(id) ON DELETE CASCADE,
+    CONSTRAINT fk_outlines_volume FOREIGN KEY (volume_id) REFERENCES volumes(id) ON DELETE SET NULL,
     UNIQUE KEY uq_outline_project_chapter (project_id, chapter_number)
 );
 

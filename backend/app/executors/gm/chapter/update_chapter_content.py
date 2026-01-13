@@ -114,16 +114,24 @@ class UpdateChapterContentExecutor(BaseToolExecutor):
                 message=f"第 {chapter_number} 章不存在",
             )
 
+        # 检查是否有选中的版本
+        if not chapter.selected_version:
+            return ToolResult(
+                success=False,
+                message=f"第 {chapter_number} 章尚未生成内容",
+            )
+
         # 保存修改前状态
+        old_content = chapter.selected_version.content
         before_state = {
             "chapter_number": chapter_number,
-            "content": chapter.content,
-            "word_count": len(chapter.content) if chapter.content else 0,
+            "content": old_content,
+            "word_count": len(old_content) if old_content else 0,
         }
 
-        # 更新内容
-        old_content = chapter.content
-        chapter.content = new_content
+        # 更新选中版本的内容
+        chapter.selected_version.content = new_content
+        chapter.word_count = len(new_content)
 
         # 保存修改后状态
         after_state = {

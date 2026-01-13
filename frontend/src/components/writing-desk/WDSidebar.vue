@@ -73,13 +73,160 @@
           </div>
 
           <div class="px-6 pb-6">
-            <div v-if="project.blueprint?.chapter_outline?.length" class="space-y-2">
-              <div
-                v-for="chapter in project.blueprint.chapter_outline"
-                :key="chapter.chapter_number"
-                :ref="el => setChapterRef(chapter.chapter_number, el)"
-                @click="$emit('selectChapter', chapter.chapter_number)"
-                :class="[
+            <!-- 有卷分组时显示分组视图 -->
+            <template v-if="hasMultipleVolumes && project.blueprint?.chapter_outline?.length">
+              <div v-for="group in volumeGroups" :key="group.volume?.id ?? 'unassigned'" class="mb-4">
+                <!-- 卷标题（可折叠） -->
+                <div
+                  @click="toggleVolume(group.volume?.id ?? null)"
+                  class="flex items-center gap-2 py-2 px-3 -mx-3 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors"
+                >
+                  <svg
+                    :class="['w-4 h-4 text-gray-500 transition-transform', isVolumeExpanded(group.volume?.id ?? null) ? 'rotate-90' : '']"
+                    fill="currentColor"
+                    viewBox="0 0 20 20"
+                  >
+                    <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"></path>
+                  </svg>
+                  <span :class="['font-semibold text-sm', group.volume ? 'text-indigo-700' : 'text-gray-500']">
+                    {{ getVolumeTitle(group) }}
+                  </span>
+                  <span class="text-xs text-gray-400 ml-auto">{{ group.chapters.length }}章</span>
+                </div>
+                <!-- 卷内章节列表 -->
+                <div v-show="isVolumeExpanded(group.volume?.id ?? null)" class="space-y-2 mt-2 pl-2 border-l-2 border-gray-100">
+                  <div
+                    v-for="chapter in group.chapters"
+                    :key="chapter.chapter_number"
+                    :ref="el => setChapterRef(chapter.chapter_number, el)"
+                    @click="$emit('selectChapter', chapter.chapter_number)"
+                    :class="[
+                      'group cursor-pointer rounded-lg border-2 p-4 transition-all duration-200',
+                      selectedForDeletion.includes(chapter.chapter_number)
+                        ? 'border-red-300 bg-red-50'
+                        : selectedChapterNumber === chapter.chapter_number
+                        ? 'border-indigo-300 bg-indigo-50 shadow-md'
+                        : 'border-gray-200 hover:border-indigo-200 hover:bg-gray-50'
+                    ]"
+                  >
+                    <!-- 标题行：章节号 + 标题 -->
+                    <div class="flex items-center gap-2 mb-2">
+                      <div
+                        :class="[
+                          'w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0',
+                          isChapterCompleted(chapter.chapter_number)
+                            ? 'bg-green-500 text-white'
+                            : isChapterGenerating(chapter.chapter_number) || isChapterEvaluating(chapter.chapter_number) || isChapterSelecting(chapter.chapter_number)
+                            ? 'bg-blue-500 text-white animate-pulse'
+                            : isChapterFailed(chapter.chapter_number)
+                            ? 'bg-red-500 text-white'
+                            : selectedChapterNumber === chapter.chapter_number
+                            ? 'bg-indigo-500 text-white'
+                            : 'bg-gray-200 text-gray-600'
+                        ]"
+                      >
+                        <svg v-if="isChapterCompleted(chapter.chapter_number)" class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                          <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path>
+                        </svg>
+                        <svg v-else-if="isChapterGenerating(chapter.chapter_number) || isChapterSelecting(chapter.chapter_number)" class="w-3.5 h-3.5 animate-spin" fill="currentColor" viewBox="0 0 20 20">
+                          <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"></path>
+                        </svg>
+                        <svg v-else-if="isChapterEvaluating(chapter.chapter_number)" class="w-3.5 h-3.5 animate-spin" fill="currentColor" viewBox="0 0 20 20">
+                          <path d="M10 2a6 6 0 00-6 6v3.586l-1.707 1.707A1 1 0 003 15v1a1 1 0 001 1h12a1 1 0 001-1v-1a1 1 0 00-.293-.707L16 11.586V8a6 6 0 00-6-6zM8.05 17a2 2 0 103.9 0H8.05z"></path>
+                        </svg>
+                        <svg v-else-if="isChapterFailed(chapter.chapter_number)" class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                          <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+                        </svg>
+                        <span v-else>{{ chapter.chapter_number }}</span>
+                      </div>
+                      <Tooltip :text="chapter.title">
+                        <h4 class="font-semibold text-gray-900 text-sm leading-snug">{{ chapter.title }}</h4>
+                      </Tooltip>
+                    </div>
+
+                    <!-- 描述：两行省略，hover 查看全部 -->
+                    <Tooltip :text="chapter.summary">
+                      <p class="text-xs text-gray-600 line-clamp-2 leading-relaxed mb-2">{{ chapter.summary }}</p>
+                    </Tooltip>
+
+                    <!-- 底部：状态 + 选择框 + 操作按钮 -->
+                    <div class="flex items-center justify-between">
+                      <div class="flex items-center gap-2">
+                        <span v-if="isChapterCompleted(chapter.chapter_number)" class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                          已完成
+                        </span>
+                        <span v-else-if="isChapterGenerating(chapter.chapter_number)" class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 animate-pulse">
+                          生成中...
+                        </span>
+                        <span v-else-if="isChapterSelecting(chapter.chapter_number)" class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 animate-pulse">
+                          选择中...
+                        </span>
+                        <span v-else-if="isChapterEvaluating(chapter.chapter_number)" class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 animate-pulse">
+                          评审中...
+                        </span>
+                        <span v-else-if="isChapterFailed(chapter.chapter_number)" class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                          生成失败
+                        </span>
+                        <span v-else-if="hasChapterInProgress(chapter.chapter_number)" class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
+                          待选择版本
+                        </span>
+                        <span v-else class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+                          未开始
+                        </span>
+                      </div>
+
+                      <div class="flex items-center gap-1">
+                        <!-- 操作按钮 -->
+                        <div class="flex items-center opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                          <button
+                            v-if="!isChapterCompleted(chapter.chapter_number)"
+                            @click.stop="$emit('editChapter', chapter)"
+                            class="p-1 text-gray-500 hover:bg-gray-100 rounded-md transition-colors"
+                            title="编辑大纲"
+                          >
+                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                              <path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z"></path>
+                              <path fill-rule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clip-rule="evenodd"></path>
+                            </svg>
+                          </button>
+                          <button
+                            v-if="canGenerateChapter(chapter.chapter_number) || isChapterFailed(chapter.chapter_number) || hasChapterInProgress(chapter.chapter_number)"
+                            @click.stop="confirmGenerateChapter(chapter.chapter_number)"
+                            :disabled="generatingChapter === chapter.chapter_number || isChapterGenerating(chapter.chapter_number)"
+                            class="p-1 text-indigo-600 hover:bg-indigo-100 rounded-md transition-colors disabled:opacity-50"
+                            :title="isChapterCompleted(chapter.chapter_number) ? '重新生成' : isChapterFailed(chapter.chapter_number) ? '重试' : hasChapterInProgress(chapter.chapter_number) ? '重新生成版本' : '开始创作'"
+                          >
+                            <svg v-if="generatingChapter === chapter.chapter_number || isChapterGenerating(chapter.chapter_number)" class="w-4 h-4 animate-spin" fill="currentColor" viewBox="0 0 20 20">
+                              <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"></path>
+                            </svg>
+                            <svg v-else class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                              <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z"></path>
+                            </svg>
+                          </button>
+                        </div>
+                        <!-- 选择框 -->
+                        <input
+                          type="checkbox"
+                          :disabled="isChapterCompleted(chapter.chapter_number)"
+                          :checked="selectedForDeletion.includes(chapter.chapter_number)"
+                          @click.stop="toggleSelection(chapter.chapter_number)"
+                          class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 disabled:opacity-50"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </template>
+            <!-- 无卷分组时显示扁平列表 -->
+            <template v-else-if="project.blueprint?.chapter_outline?.length">
+              <div class="space-y-2">
+                <div
+                  v-for="chapter in project.blueprint.chapter_outline"
+                  :key="chapter.chapter_number"
+                  :ref="el => setChapterRef(chapter.chapter_number, el)"
+                  @click="$emit('selectChapter', chapter.chapter_number)"
+                  :class="[
                   'group cursor-pointer rounded-lg border-2 p-4 transition-all duration-200',
                   selectedForDeletion.includes(chapter.chapter_number)
                     ? 'border-red-300 bg-red-50'
@@ -194,7 +341,8 @@
                   </div>
                 </div>
               </div>
-            </div>
+              </div>
+            </template>
             <div v-else class="text-center py-8 text-gray-500">
               <svg class="w-12 h-12 mx-auto mb-3 opacity-50" fill="currentColor" viewBox="0 0 20 20">
                 <path d="M4 4a2 2 0 00-2 2v1h16V6a2 2 0 00-2-2H4zM18 9H2v5a2 2 0 002 2h12a2 2 0 002-2V9z"></path>
@@ -235,11 +383,16 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, nextTick } from 'vue'
+import { computed, ref, nextTick, watch } from 'vue'
 import type { ComponentPublicInstance } from 'vue'
 import { globalAlert } from '@/composables/useAlert'
-import type { NovelProject } from '@/api/novel'
+import type { NovelProject, ChapterOutline, Volume } from '@/api/novel'
 import Tooltip from '@/components/Tooltip.vue'
+
+interface VolumeGroup {
+  volume: Volume | null
+  chapters: ChapterOutline[]
+}
 
 interface Props {
   project: NovelProject
@@ -257,6 +410,7 @@ const emit = defineEmits(['closeSidebar', 'selectChapter', 'generateChapter', 'e
 const selectedForDeletion = ref<number[]>([])
 const listContainer = ref<HTMLElement | null>(null)
 const chapterRefs = ref<Record<number, HTMLElement | null>>({})
+const expandedVolumes = ref<Set<number | null>>(new Set([null])) // null 表示"未分配"组，默认展开
 
 const characterCount = computed(() => {
   return props.project?.blueprint?.characters?.length || 0
@@ -265,6 +419,103 @@ const characterCount = computed(() => {
 const relationshipCount = computed(() => {
   return props.project?.blueprint?.relationships?.length || 0
 })
+
+// 按卷分组章节
+const volumeGroups = computed<VolumeGroup[]>(() => {
+  const outlines = props.project?.blueprint?.chapter_outline || []
+  const volumes = props.project?.volumes || []
+
+  // 创建卷ID到卷对象的映射
+  const volumeMap = new Map<number, Volume>()
+  for (const vol of volumes) {
+    volumeMap.set(vol.id, vol)
+  }
+
+  // 按卷分组
+  const groups = new Map<number | null, ChapterOutline[]>()
+
+  for (const chapter of outlines) {
+    const volumeId = chapter.volume_id ?? null
+    if (!groups.has(volumeId)) {
+      groups.set(volumeId, [])
+    }
+    groups.get(volumeId)!.push(chapter)
+  }
+
+  // 转换为数组并排序
+  const result: VolumeGroup[] = []
+
+  // 先添加有卷分配的组（按卷号排序）
+  const volumeEntries = [...groups.entries()]
+    .filter(([id]) => id !== null)
+    .sort(([a], [b]) => {
+      const volA = volumeMap.get(a as number)
+      const volB = volumeMap.get(b as number)
+      return (volA?.volume_number || 0) - (volB?.volume_number || 0)
+    })
+
+  for (const [volumeId, chapters] of volumeEntries) {
+    const volume = volumeMap.get(volumeId as number) || null
+    result.push({
+      volume,
+      chapters: chapters.sort((a, b) => a.chapter_number - b.chapter_number)
+    })
+  }
+
+  // 最后添加未分配的组
+  const unassigned = groups.get(null)
+  if (unassigned && unassigned.length > 0) {
+    result.push({
+      volume: null,
+      chapters: unassigned.sort((a, b) => a.chapter_number - b.chapter_number)
+    })
+  }
+
+  return result
+})
+
+// 是否有多个卷（用于决定是否显示卷分组UI）
+const hasMultipleVolumes = computed(() => {
+  return volumeGroups.value.length > 1 || (props.project?.volumes?.length || 0) > 0
+})
+
+// 切换卷的展开/折叠状态
+const toggleVolume = (volumeId: number | null) => {
+  if (expandedVolumes.value.has(volumeId)) {
+    expandedVolumes.value.delete(volumeId)
+  } else {
+    expandedVolumes.value.add(volumeId)
+  }
+  // 触发响应式更新
+  expandedVolumes.value = new Set(expandedVolumes.value)
+}
+
+// 检查卷是否展开
+const isVolumeExpanded = (volumeId: number | null) => {
+  return expandedVolumes.value.has(volumeId)
+}
+
+// 获取卷的显示名称
+const getVolumeTitle = (group: VolumeGroup) => {
+  if (group.volume) {
+    return `第${group.volume.volume_number}卷 ${group.volume.title}`
+  }
+  return '未分配章节'
+}
+
+// 当项目或卷列表变化时，自动展开所有卷
+watch(
+  () => props.project?.volumes,
+  (newVolumes) => {
+    if (newVolumes) {
+      for (const vol of newVolumes) {
+        expandedVolumes.value.add(vol.id)
+      }
+      expandedVolumes.value = new Set(expandedVolumes.value)
+    }
+  },
+  { immediate: true }
+)
 
 const lastChapterNumber = computed(() => {
   if (!props.project?.blueprint?.chapter_outline || props.project.blueprint.chapter_outline.length === 0) {

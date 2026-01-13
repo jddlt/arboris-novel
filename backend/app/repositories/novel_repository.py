@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from .base import BaseRepository
-from ..models import Chapter, NovelProject
+from ..models import Chapter, ChapterOutline, NovelProject, Volume
 
 
 class NovelRepository(BaseRepository[NovelProject]):
@@ -18,7 +18,8 @@ class NovelRepository(BaseRepository[NovelProject]):
                 selectinload(NovelProject.blueprint),
                 selectinload(NovelProject.characters),
                 selectinload(NovelProject.relationships_),
-                selectinload(NovelProject.outlines),
+                selectinload(NovelProject.outlines).selectinload(ChapterOutline.volume),
+                selectinload(NovelProject.volumes).selectinload(Volume.outlines),
                 selectinload(NovelProject.conversations),
                 selectinload(NovelProject.chapters).selectinload(Chapter.versions),
                 selectinload(NovelProject.chapters).selectinload(Chapter.evaluations),

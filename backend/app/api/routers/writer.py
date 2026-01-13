@@ -169,6 +169,33 @@ async def generate_chapter(
     # print("rag_context:",rag_context)
     # 将蓝图、前情、RAG 检索结果拼装成结构化段落，供模型理解
     blueprint_text = json.dumps(blueprint_dict, ensure_ascii=False, indent=2)
+
+    # 提取伏笔信息，单独注入让 AI 更好掌控全局
+    foreshadowing_data = blueprint_dict.get("foreshadowing", {})
+    foreshadowing_text = json.dumps(foreshadowing_data, ensure_ascii=False, indent=2) if foreshadowing_data else "暂无伏笔"
+
+    # 找出当前章节所在的卷（通过 outline.volume 关联）
+    current_volume_info = "未分配到卷"
+    if outline.volume:
+        vol = outline.volume
+        current_volume_info = f"第{vol.volume_number}卷「{vol.title}」- 概要：{vol.summary or '未定义'}"
+
+    # 找出与当前章节相关的伏笔（需要在本章埋设或揭示的）
+    relevant_foreshadowing = []
+    if foreshadowing_data and "threads" in foreshadowing_data:
+        for thread in foreshadowing_data["threads"]:
+            plant_ch = thread.get("plant_chapter", 0)
+            reveal_ch = thread.get("reveal_chapter", 0)
+            # 本章需要埋设或揭示的伏笔
+            if plant_ch == request.chapter_number:
+                relevant_foreshadowing.append(f"【埋设】{thread.get('title', '')}：{thread.get('description', '')}")
+            elif reveal_ch == request.chapter_number:
+                relevant_foreshadowing.append(f"【揭示】{thread.get('title', '')}：{thread.get('description', '')}")
+            # 已埋设但未揭示的活跃伏笔（提醒 AI 可以添加线索）
+            elif plant_ch < request.chapter_number < reveal_ch and thread.get("status") == "active":
+                relevant_foreshadowing.append(f"【活跃-可添加线索】{thread.get('title', '')}")
+    relevant_foreshadowing_text = "\n".join(relevant_foreshadowing) if relevant_foreshadowing else "本章无特定伏笔任务"
+
     completed_lines = [
         f"- 第{item['chapter_number']}章 - {item['title']}:{item['summary']}"
         for item in completed_chapters
@@ -192,6 +219,8 @@ async def generate_chapter(
 
     prompt_sections = [
         ("[世界蓝图](JSON)", blueprint_text),
+        ("[当前所在卷]", current_volume_info),
+        ("[本章伏笔任务]", relevant_foreshadowing_text),
         # ("[前情摘要]", completed_section),
         ("[上一章摘要]", previous_summary_text),
         ("[上一章结尾]", previous_tail_excerpt),

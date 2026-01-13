@@ -25,12 +25,20 @@ router = APIRouter(prefix="/api/novels/{project_id}/gm", tags=["GM Agent"])
 # ==================== Request/Response Schemas ====================
 
 
+class ImagePayload(BaseModel):
+    """图片数据。"""
+
+    base64: str = Field(..., description="图片的 base64 编码数据")
+    mime_type: str = Field(..., description="图片 MIME 类型，如 image/png, image/jpeg")
+
+
 class GMChatRequest(BaseModel):
     """GM 对话请求。"""
 
-    message: str = Field(..., min_length=1, max_length=10000, description="用户消息")
+    message: str = Field("", max_length=10000, description="用户消息")
     conversation_id: Optional[str] = Field(None, description="对话 ID，不传则创建新对话")
     enable_web_search: bool = Field(False, description="是否启用联网搜索（仅 Gemini 模型支持）")
+    images: Optional[List[ImagePayload]] = Field(None, max_length=4, description="附带的图片列表（最多4张）")
 
 
 class PendingActionResponse(BaseModel):
@@ -202,12 +210,18 @@ async def stream_chat_with_gm(
     gm_service = GMService(session)
 
     logger.info(
-        "GM 流式对话请求: project_id=%s, user_id=%s, conversation_id=%s, message_len=%d",
+        "GM 流式对话请求: project_id=%s, user_id=%s, conversation_id=%s, message_len=%d, images=%d",
         project_id,
         current_user.id,
         request.conversation_id,
         len(request.message),
+        len(request.images) if request.images else 0,
     )
+
+    # 转换图片数据为字典格式
+    images_data = None
+    if request.images:
+        images_data = [{"base64": img.base64, "mime_type": img.mime_type} for img in request.images]
 
     async def event_generator():
         """SSE 事件生成器。"""
@@ -218,6 +232,7 @@ async def stream_chat_with_gm(
                 conversation_id=request.conversation_id,
                 user_id=current_user.id,
                 enable_web_search=request.enable_web_search,
+                images=images_data,
             ):
                 event_type = event.get("type", "message")
                 event_data = json.dumps(event, ensure_ascii=False)
@@ -325,6 +340,88 @@ async def discard_actions(
     count = await gm_service.discard_actions(action_ids=request.action_ids)
 
     return DiscardActionsResponse(discarded_count=count)
+
+
+class ActionResultItem(BaseModel):
+    """单个操作执行结果。"""
+
+    action_id: str = Field(..., description="操作 ID")
+    success: bool = Field(..., description="是否成功")
+    message: str = Field(..., description="执行结果消息")
+
+
+class ContinueChatRequest(BaseModel):
+    """继续对话请求。"""
+
+    conversation_id: str = Field(..., description="对话 ID")
+    action_results: List[ActionResultItem] = Field(..., description="操作执行结果列表")
+    enable_web_search: bool = Field(False, description="是否启用联网搜索")
+
+
+@router.post("/chat/continue")
+async def continue_chat_with_gm(
+    project_id: str,
+    request: ContinueChatRequest,
+    session: AsyncSession = Depends(get_session),
+    current_user: UserInDB = Depends(get_current_user),
+) -> StreamingResponse:
+    """在应用操作后继续对话（SSE）。
+
+    当 Agent 返回 awaiting_confirmation=True 且用户应用了操作后，
+    调用此接口让 Agent 继续思考和执行任务。
+
+    Args:
+        project_id: 小说项目 ID
+        request: 继续对话请求
+
+    Returns:
+        SSE 流式响应
+    """
+    from ...services.novel_service import NovelService
+
+    novel_service = NovelService(session)
+    await novel_service.ensure_project_owner(project_id, current_user.id)
+
+    gm_service = GMService(session)
+
+    logger.info(
+        "GM 继续对话: project_id=%s, user_id=%s, conversation_id=%s, results=%d",
+        project_id,
+        current_user.id,
+        request.conversation_id,
+        len(request.action_results),
+    )
+
+    # 转换为字典列表
+    action_results = [r.model_dump() for r in request.action_results]
+
+    async def event_generator():
+        """SSE 事件生成器。"""
+        try:
+            async for event in gm_service.continue_chat(
+                project_id=project_id,
+                conversation_id=request.conversation_id,
+                action_results=action_results,
+                user_id=current_user.id,
+                enable_web_search=request.enable_web_search,
+            ):
+                event_type = event.get("type", "message")
+                event_data = json.dumps(event, ensure_ascii=False)
+                yield f"event: {event_type}\ndata: {event_data}\n\n"
+        except Exception as e:
+            logger.error("SSE 流异常: %s", e, exc_info=True)
+            error_event = json.dumps({"type": "error", "error": str(e)}, ensure_ascii=False)
+            yield f"event: error\ndata: {error_event}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/conversations", response_model=List[ConversationSummary])

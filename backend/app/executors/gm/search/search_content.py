@@ -7,7 +7,11 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from ..base import BaseToolExecutor, ToolDefinition, ToolResult
 from ....services.gm.tool_registry import ToolRegistry
-from ....services.vector_store_service import VectorStoreService, RetrievedChunk, RetrievedSummary
+from ....services.vector_store_service import (
+    VectorStoreService,
+    RetrievedChunk,
+    RetrievedSummary,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +23,9 @@ logger = logging.getLogger(__name__)
 class SearchContentExecutor(BaseToolExecutor):
     """搜索小说内容（基于 RAG 向量检索）。"""
 
+    # 查询类工具，自动执行
+    is_read_only = True
+
     @classmethod
     def get_name(cls) -> str:
         return "search_content"
@@ -27,13 +34,13 @@ class SearchContentExecutor(BaseToolExecutor):
     def get_definition(cls) -> ToolDefinition:
         return ToolDefinition(
             name="search_content",
-            description="搜索小说内容，基于语义相似度查找相关的剧情片段和章节摘要。用于回顾特定情节、确认设定一致性。",
+            description="搜索小说内容，基于语义相似度查找相关的剧情片段和章节摘要。支持时间衰减权重，优先返回最新章节的匹配结果。用于回顾特定情节、确认设定一致性、查找人物最新状态等。",
             parameters={
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "搜索查询，描述要查找的内容，如：「主角与反派的第一次交锋」「女主的身世背景」",
+                        "description": "搜索查询，描述要查找的内容，如：「主角与反派的第一次交锋」「女主的身世背景」「主角当前的装备」",
                     },
                     "search_type": {
                         "type": "string",
@@ -43,6 +50,10 @@ class SearchContentExecutor(BaseToolExecutor):
                     "top_k": {
                         "type": "integer",
                         "description": "返回的最大结果数量，默认5",
+                    },
+                    "recency_weight": {
+                        "type": "number",
+                        "description": "时间衰减权重（0-1），越高则越优先返回最新章节的结果。0=纯语义排序，1=纯按章节倒序。默认0.3",
                     },
                 },
                 "required": ["query"],
@@ -80,6 +91,13 @@ class SearchContentExecutor(BaseToolExecutor):
         if top_k > 20:
             top_k = 20
 
+        # 获取时间衰减权重（0-1），默认 0.3
+        try:
+            recency_weight = float(params.get("recency_weight", 0.3))
+        except (ValueError, TypeError):
+            recency_weight = 0.3
+        recency_weight = max(0.0, min(1.0, recency_weight))
+
         # 生成查询向量
         llm_service = LLMService(self.session)
         try:
@@ -97,10 +115,12 @@ class SearchContentExecutor(BaseToolExecutor):
                 message="搜索失败：向量服务未配置或不可用",
             )
 
-        # 执行向量检索
+        # 执行向量检索（获取更多结果用于重排序）
+        fetch_k = top_k * 3 if recency_weight > 0 else top_k
         vector_store = VectorStoreService()
         results: Dict[str, Any] = {
             "query": query,
+            "recency_weight": recency_weight,
             "chunks": [],
             "summaries": [],
         }
@@ -110,14 +130,16 @@ class SearchContentExecutor(BaseToolExecutor):
                 chunks = await vector_store.query_chunks(
                     project_id=project_id,
                     embedding=embedding,
-                    top_k=top_k,
+                    top_k=fetch_k,
                 )
+                # 应用时间衰减重排序
+                chunks = self._rerank_by_recency(chunks, recency_weight)[:top_k]
                 results["chunks"] = [
                     {
                         "chapter_number": c.chapter_number,
                         "chapter_title": c.chapter_title,
                         "content": c.content[:500] + "..." if len(c.content) > 500 else c.content,
-                        "score": round(c.score, 4),
+                        "semantic_score": round(c.score, 4),
                     }
                     for c in chunks
                 ]
@@ -129,14 +151,16 @@ class SearchContentExecutor(BaseToolExecutor):
                 summaries = await vector_store.query_summaries(
                     project_id=project_id,
                     embedding=embedding,
-                    top_k=top_k,
+                    top_k=fetch_k,
                 )
+                # 应用时间衰减重排序
+                summaries = self._rerank_summaries_by_recency(summaries, recency_weight)[:top_k]
                 results["summaries"] = [
                     {
                         "chapter_number": s.chapter_number,
                         "title": s.title,
                         "summary": s.summary[:300] + "..." if len(s.summary) > 300 else s.summary,
-                        "score": round(s.score, 4),
+                        "semantic_score": round(s.score, 4),
                     }
                     for s in summaries
                 ]
@@ -160,9 +184,10 @@ class SearchContentExecutor(BaseToolExecutor):
             summary_parts.append(f"{len(results['summaries'])} 个章节摘要")
 
         logger.info(
-            "搜索内容成功: project=%s, query=%s, results=%d",
+            "搜索内容成功: project=%s, query=%s, recency_weight=%.2f, results=%d",
             project_id,
             query[:50],
+            recency_weight,
             total_results,
         )
 
@@ -171,3 +196,50 @@ class SearchContentExecutor(BaseToolExecutor):
             message=f"找到 {' 和 '.join(summary_parts)}",
             data=results,
         )
+
+    def _rerank_by_recency(
+        self, chunks: List[RetrievedChunk], recency_weight: float
+    ) -> List[RetrievedChunk]:
+        """根据时间衰减权重重排序剧情片段。
+
+        final_score = semantic_distance * (1 - recency_weight) + recency_penalty * recency_weight
+
+        其中 recency_penalty 基于章节号归一化，章节越新惩罚越小。
+        """
+        if not chunks or recency_weight == 0:
+            return chunks
+
+        max_chapter = max(c.chapter_number for c in chunks)
+        min_chapter = min(c.chapter_number for c in chunks)
+        chapter_range = max_chapter - min_chapter if max_chapter > min_chapter else 1
+
+        scored_chunks = []
+        for c in chunks:
+            # 归一化章节号：最新章节 = 0，最老章节 = 1
+            recency_penalty = (max_chapter - c.chapter_number) / chapter_range
+            # 综合得分：语义距离 + 时间惩罚
+            final_score = c.score * (1 - recency_weight) + recency_penalty * recency_weight
+            scored_chunks.append((final_score, c))
+
+        scored_chunks.sort(key=lambda x: x[0])
+        return [c for _, c in scored_chunks]
+
+    def _rerank_summaries_by_recency(
+        self, summaries: List[RetrievedSummary], recency_weight: float
+    ) -> List[RetrievedSummary]:
+        """根据时间衰减权重重排序章节摘要。"""
+        if not summaries or recency_weight == 0:
+            return summaries
+
+        max_chapter = max(s.chapter_number for s in summaries)
+        min_chapter = min(s.chapter_number for s in summaries)
+        chapter_range = max_chapter - min_chapter if max_chapter > min_chapter else 1
+
+        scored_summaries = []
+        for s in summaries:
+            recency_penalty = (max_chapter - s.chapter_number) / chapter_range
+            final_score = s.score * (1 - recency_weight) + recency_penalty * recency_weight
+            scored_summaries.append((final_score, s))
+
+        scored_summaries.sort(key=lambda x: x[0])
+        return [s for _, s in scored_summaries]

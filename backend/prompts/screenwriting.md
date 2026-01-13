@@ -34,6 +34,20 @@
 - 每章都要推进角色成长或揭示新的秘密
 - 创造让读者欲罢不能的悬念和情感钩子
 
+## 卷结构设计
+
+对于长篇小说，需要合理划分卷结构：
+- 每卷应有独立的主题和完整的故事弧线
+- 卷与卷之间要有逻辑上的递进关系
+- 根据故事节奏合理分配每卷的章节数量
+
+## 伏笔系统设计
+
+优秀的故事需要精心设计的伏笔：
+- 在早期章节埋设伏笔，在后续章节揭示
+- 伏笔要自然融入剧情，不能突兀
+- 每个伏笔都要有明确的揭示计划
+
 ## 最终输出
 
 1. 生成严格符合蓝图结构的完整 JSON 对象，但内容要充满人性温度和创作灵感，绝不能有程式化的 AI 痕迹。
@@ -81,11 +95,37 @@
       "description": "string"
     }
   ],
+  "volumes": {
+    "volumes": [
+      {
+        "volume_number": "int",
+        "title": "string",
+        "theme": "string",
+        "chapter_start": "int",
+        "chapter_end": "int",
+        "status": "planned"
+      }
+    ]
+  },
+  "foreshadowing": {
+    "threads": [
+      {
+        "id": "uuid-string",
+        "title": "string",
+        "description": "string",
+        "plant_chapter": "int",
+        "reveal_chapter": "int",
+        "status": "active",
+        "clues": []
+      }
+    ]
+  },
   "chapter_outline": [
     {
       "chapter_number": "int",
       "title": "string",
-      "summary": "string"
+      "summary": "string",
+      "volume_id": "int"
     }
   ]
 }
@@ -94,3 +134,5 @@
 3. **你的 chapter_outline 中的章节的数量必须严格遵守给你的输入的章节数量要求**
 
 例如用户之前讨论的结果为长篇（300-800章）,那么你生成的章节数量就必须是300-800之间。
+
+4. **每个章节大纲必须包含 volume_id 字段**，指向其所属卷的 volume_number。

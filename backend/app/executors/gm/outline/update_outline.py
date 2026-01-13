@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional, TYPE_CHECKING
 from sqlalchemy import select
 
 from ..base import BaseToolExecutor, ToolDefinition, ToolResult
-from ....models.novel import ChapterOutline
+from ....models.novel import ChapterOutline, Volume
 from ....services.gm.tool_registry import ToolRegistry
 
 if TYPE_CHECKING:
@@ -29,7 +29,7 @@ class UpdateOutlineExecutor(BaseToolExecutor):
     def get_definition(cls) -> ToolDefinition:
         return ToolDefinition(
             name="update_outline",
-            description="更新指定章节的大纲内容。可以修改标题和/或摘要。",
+            description="更新指定章节的大纲内容。可以修改标题、摘要，或分配到指定卷。",
             parameters={
                 "type": "object",
                 "properties": {
@@ -45,6 +45,10 @@ class UpdateOutlineExecutor(BaseToolExecutor):
                         "type": "string",
                         "description": "新的章节摘要（可选）",
                     },
+                    "volume_number": {
+                        "type": "integer",
+                        "description": "分配到指定卷（可选，传0表示取消卷分配）",
+                    },
                 },
                 "required": ["chapter_number"],
             },
@@ -53,9 +57,16 @@ class UpdateOutlineExecutor(BaseToolExecutor):
     def generate_preview(self, params: Dict[str, Any]) -> str:
         chapter_number = params.get("chapter_number", "?")
         title = params.get("title")
+        volume_number = params.get("volume_number")
+        parts = [f"修改大纲：第{chapter_number}章"]
         if title:
-            return f"修改大纲：第{chapter_number}章 - {title}"
-        return f"修改大纲：第{chapter_number}章"
+            parts.append(f"标题={title}")
+        if volume_number is not None:
+            if volume_number == 0:
+                parts.append("取消卷分配")
+            else:
+                parts.append(f"分配到第{volume_number}卷")
+        return " - ".join(parts) if len(parts) > 1 else parts[0]
 
     async def validate_params(self, params: Dict[str, Any]) -> Optional[str]:
         # 参数别名标准化: chapter_index/章节号 -> chapter_number
@@ -69,6 +80,8 @@ class UpdateOutlineExecutor(BaseToolExecutor):
             params["summary"] = params.pop("摘要")
         if "内容" in params and "summary" not in params:
             params["summary"] = params.pop("内容")
+        if "卷号" in params and "volume_number" not in params:
+            params["volume_number"] = params.pop("卷号")
 
         chapter_number = params.get("chapter_number")
         if chapter_number is None:
@@ -82,11 +95,21 @@ class UpdateOutlineExecutor(BaseToolExecutor):
 
         title = params.get("title")
         summary = params.get("summary")
-        if not title and not summary:
-            return "必须至少提供新的标题或摘要"
+        volume_number = params.get("volume_number")
+        if not title and not summary and volume_number is None:
+            return "必须至少提供新的标题、摘要或卷号"
 
         if title and len(title) > 255:
             return "章节标题过长，最多255个字符"
+
+        if volume_number is not None:
+            try:
+                volume_number = int(volume_number)
+                if volume_number < 0:
+                    return "卷号不能为负数"
+            except (ValueError, TypeError):
+                return "卷号必须是有效的整数"
+
         return None
 
     async def execute(self, project_id: str, params: Dict[str, Any]) -> ToolResult:
@@ -111,6 +134,7 @@ class UpdateOutlineExecutor(BaseToolExecutor):
             "chapter_number": outline.chapter_number,
             "title": outline.title,
             "summary": outline.summary,
+            "volume_id": outline.volume_id,
         }
 
         # 更新字段
@@ -119,6 +143,29 @@ class UpdateOutlineExecutor(BaseToolExecutor):
         if "summary" in params and params["summary"]:
             outline.summary = params["summary"].strip()
 
+        # 处理卷分配
+        volume_number = params.get("volume_number")
+        if volume_number is not None:
+            volume_number = int(volume_number)
+            if volume_number == 0:
+                # 取消卷分配
+                outline.volume_id = None
+            else:
+                # 查找目标卷
+                vol_result = await self.session.execute(
+                    select(Volume).where(
+                        Volume.project_id == project_id,
+                        Volume.volume_number == volume_number,
+                    )
+                )
+                volume = vol_result.scalars().first()
+                if not volume:
+                    return ToolResult(
+                        success=False,
+                        message=f"第{volume_number}卷不存在，请先创建卷",
+                    )
+                outline.volume_id = volume.id
+
         await self.session.flush()
 
         after_state = {
@@ -126,6 +173,7 @@ class UpdateOutlineExecutor(BaseToolExecutor):
             "chapter_number": outline.chapter_number,
             "title": outline.title,
             "summary": outline.summary,
+            "volume_id": outline.volume_id,
         }
 
         logger.info(
