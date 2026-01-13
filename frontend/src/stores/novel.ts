@@ -149,14 +149,14 @@ export const useNovelStore = defineStore('novel', () => {
     }
   }
 
-  async function generateChapter(chapterNumber: number): Promise<NovelProject> {
+  async function generateChapter(chapterNumber: number, writingNotes?: string): Promise<NovelProject> {
     // 注意：这里不设置全局 isLoading，因为 WritingDesk.vue 有自己的局部加载状态
     error.value = null
     try {
       if (!currentProject.value) {
         throw new Error('没有当前项目')
       }
-      const updatedProject = await NovelAPI.generateChapter(currentProject.value.id, chapterNumber)
+      const updatedProject = await NovelAPI.generateChapter(currentProject.value.id, chapterNumber, writingNotes)
       currentProject.value = updatedProject // 更新 store 中的当前项目
       return updatedProject
     } catch (err) {
@@ -288,6 +288,25 @@ export const useNovelStore = defineStore('novel', () => {
     }
   }
 
+  async function refineChapterVersion(chapterNumber: number, versionIndex: number, refinementPrompt: string) {
+    error.value = null
+    try {
+      if (!currentProject.value) {
+        throw new Error('没有当前项目')
+      }
+      const updatedProject = await NovelAPI.refineChapterVersion(
+        currentProject.value.id,
+        chapterNumber,
+        versionIndex,
+        refinementPrompt
+      )
+      currentProject.value = updatedProject // 更新 store
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : '版本微调失败'
+      throw err
+    }
+  }
+
   function clearError() {
     error.value = null
   }
@@ -322,6 +341,7 @@ export const useNovelStore = defineStore('novel', () => {
     deleteChapter,
     generateChapterOutline,
     editChapterContent,
+    refineChapterVersion,
     clearError,
     setCurrentProject
   }

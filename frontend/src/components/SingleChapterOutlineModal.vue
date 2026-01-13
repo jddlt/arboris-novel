@@ -7,6 +7,37 @@
       </div>
 
       <div class="p-6 space-y-5">
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">章节序号 *</label>
+            <input
+              type="number"
+              v-model.number="localOutline.chapter_number"
+              min="1"
+              :class="[
+                'w-full px-4 py-3 border rounded-lg focus:ring-2 transition',
+                isDuplicateChapter
+                  ? 'border-red-500 focus:ring-red-500 focus:border-red-500'
+                  : 'border-gray-300 focus:ring-indigo-500 focus:border-indigo-500'
+              ]"
+              placeholder="1"
+            />
+            <p v-if="isDuplicateChapter" class="text-red-500 text-xs mt-1">该章节序号已存在</p>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">所属卷</label>
+            <select
+              v-model="localOutline.volume_id"
+              class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition bg-white"
+            >
+              <option :value="null">未分配</option>
+              <option v-for="vol in volumes" :key="vol.id" :value="vol.id">
+                第{{ vol.volume_number }}卷 {{ vol.title }}
+              </option>
+            </select>
+          </div>
+        </div>
+
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-2">章节标题 *</label>
           <input
@@ -37,7 +68,7 @@
         </button>
         <button
           @click="save"
-          :disabled="!localOutline.title?.trim()"
+          :disabled="!canSave"
           class="px-5 py-2.5 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {{ isNew ? '添加' : '保存' }}
@@ -48,12 +79,19 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, defineProps, defineEmits } from 'vue'
+import { ref, watch, computed, defineProps, defineEmits } from 'vue'
+
+interface Volume {
+  id: number
+  volume_number: number
+  title: string
+}
 
 interface ChapterOutline {
   chapter_number: number
   title: string
   summary: string
+  volume_id?: number | null
 }
 
 const props = defineProps<{
@@ -61,6 +99,8 @@ const props = defineProps<{
   outline: ChapterOutline | null
   isNew: boolean
   nextChapterNumber?: number
+  volumes?: Volume[]
+  existingChapterNumbers?: number[]
 }>()
 
 const emit = defineEmits<{
@@ -71,10 +111,28 @@ const emit = defineEmits<{
 const emptyOutline = (): ChapterOutline => ({
   chapter_number: props.nextChapterNumber || 1,
   title: '',
-  summary: ''
+  summary: '',
+  volume_id: null
 })
 
 const localOutline = ref<ChapterOutline>(emptyOutline())
+
+// 检测是否为重复章节号
+const isDuplicateChapter = computed(() => {
+  const num = localOutline.value.chapter_number
+  if (!num || num < 1) return false
+  const existing = props.existingChapterNumbers || []
+  // 编辑模式下，允许保持原来的章节号
+  if (!props.isNew && props.outline?.chapter_number === num) return false
+  return existing.includes(num)
+})
+
+// 是否可以保存
+const canSave = computed(() => {
+  return localOutline.value.title?.trim() &&
+         localOutline.value.chapter_number >= 1 &&
+         !isDuplicateChapter.value
+})
 
 watch(() => props.show, (visible) => {
   if (visible) {
@@ -84,14 +142,15 @@ watch(() => props.show, (visible) => {
       localOutline.value = {
         chapter_number: props.nextChapterNumber || 1,
         title: '',
-        summary: ''
+        summary: '',
+        volume_id: null
       }
     }
   }
 }, { immediate: true })
 
 const save = () => {
-  if (!localOutline.value.title?.trim()) return
+  if (!canSave.value) return
   emit('save', JSON.parse(JSON.stringify(localOutline.value)))
 }
 </script>

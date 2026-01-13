@@ -60,10 +60,12 @@
           @showVersionDetail="$emit('showVersionDetail', $event)"
           @confirmVersionSelection="$emit('confirmVersionSelection')"
           @generateChapter="$emit('generateChapter', $event)"
+          @showStartCreationModal="$emit('showStartCreationModal', $event)"
           @showVersionSelector="$emit('showVersionSelector')"
           @regenerateChapter="$emit('regenerateChapter')"
           @evaluateChapter="$emit('evaluateChapter')"
           @showEvaluationDetail="$emit('showEvaluationDetail')"
+          @refineVersion="$emit('refineVersion', $event)"
         />
       </div>
     </div>
@@ -165,7 +167,9 @@ const emit = defineEmits([
   'showVersionSelector',
   'showEvaluationDetail',
   'fetchChapterStatus',
-  'editChapter'
+  'editChapter',
+  'showStartCreationModal',
+  'refineVersion'
 ])
 
 const confirmRegenerateChapter = async () => {

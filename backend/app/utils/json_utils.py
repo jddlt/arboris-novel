@@ -8,6 +8,17 @@ def remove_think_tags(raw_text: str) -> str:
     return re.sub(r"<think>.*?</think>", "", raw_text, flags=re.DOTALL).strip()
 
 
+def strip_markdown_fences(raw_text: str) -> str:
+    """移除 Markdown 代码块标记（```json、```等），保留内部内容。"""
+    if not raw_text:
+        return raw_text
+    # 移除开头的 ```json 或 ``` 标记
+    cleaned = re.sub(r"^```(?:json|JSON)?\s*\n?", "", raw_text.strip())
+    # 移除结尾的 ``` 标记
+    cleaned = re.sub(r"\n?```\s*$", "", cleaned)
+    return cleaned.strip()
+
+
 def unwrap_markdown_json(raw_text: str) -> str:
     """从 Markdown 或普通文本中提取 JSON 字符串。"""
     if not raw_text:

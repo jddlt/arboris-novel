@@ -53,12 +53,20 @@ export interface ConversationSummary {
 export interface ConversationMessage {
   role: 'user' | 'assistant'
   content: string
+  timestamp?: string
   actions?: {
     action_id: string
     tool_name: string
     params: Record<string, unknown>
-    preview: string
+    preview?: string
     status: string
+  }[]
+  executed_tools?: {
+    tool_name: string
+    params?: Record<string, unknown>
+    status: string
+    message?: string
+    preview?: string
   }[]
 }
 

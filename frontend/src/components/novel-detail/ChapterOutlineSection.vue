@@ -136,6 +136,8 @@
       :outline="editingOutline"
       :is-new="isNewOutline"
       :next-chapter-number="nextChapterNumber"
+      :volumes="volumes"
+      :existing-chapter-numbers="existingChapterNumbers"
       @close="closeModal"
       @save="handleSave"
     />
@@ -204,6 +206,11 @@ const expandedVolumes = ref<Set<number | null>>(new Set([null]))
 const nextChapterNumber = computed(() => {
   if (props.outline.length === 0) return 1
   return Math.max(...props.outline.map(o => o.chapter_number)) + 1
+})
+
+// 现有章节号列表（用于重复检测）
+const existingChapterNumbers = computed(() => {
+  return props.outline.map(o => o.chapter_number)
 })
 
 // 按卷分组章节

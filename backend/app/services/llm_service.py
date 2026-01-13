@@ -725,11 +725,14 @@ class LLMService:
                                     # 工具调用
                                     if "functionCall" in part:
                                         fc = part["functionCall"]
-                                        tool_calls.append({
+                                        tool_call = {
                                             "id": f"call_{len(tool_calls)}",
                                             "name": fc.get("name", ""),
                                             "arguments": json.dumps(fc.get("args", {}), ensure_ascii=False),
-                                        })
+                                        }
+                                        tool_calls.append(tool_call)
+                                        # 立即通知前端有新的工具调用
+                                        yield {"type": "tool_call", "tool_call": tool_call}
                                         logger.debug("Gemini 返回工具调用: %s", fc.get("name", ""))
 
                             # 检查 grounding metadata（google_search 结果）

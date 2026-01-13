@@ -15,7 +15,7 @@
     <!-- 主要内容区域 -->
     <div
       class="flex-1 px-4 sm:px-6 lg:px-8 py-6 overflow-hidden transition-all duration-300"
-      :class="showGMAgentPanel ? 'lg:mr-[520px]' : ''"
+      :class="showGMAgentPanel ? 'mr-[450px] min-[1600px]:mr-[520px]' : ''"
     >
       <!-- 加载状态 -->
       <div v-if="novelStore.isLoading" class="h-full flex justify-center items-center">
@@ -77,9 +77,11 @@
           @show-version-detail="showVersionDetail"
           @confirm-version-selection="confirmVersionSelection"
           @generate-chapter="generateChapter"
+          @show-start-creation-modal="openStartCreationModal"
           @show-evaluation-detail="showEvaluationDetailModal = true"
           @fetch-chapter-status="fetchChapterStatus"
           @edit-chapter="editChapterContent"
+          @refine-version="openRefineVersionModal"
           />
         </div>
       </div>
@@ -110,6 +112,22 @@
       @close="showGenerateOutlineModal = false"
       @generate="handleGenerateOutline"
     />
+    <WDStartCreationModal
+      :show="showStartCreationModal"
+      :chapter-number="startCreationChapterNumber || 0"
+      :chapter-title="getChapterOutlineForModal?.title"
+      :chapter-summary="getChapterOutlineForModal?.summary"
+      @close="closeStartCreationModal"
+      @generate="handleStartCreation"
+    />
+    <WDVersionRefineModal
+      :show="showVersionRefineModal"
+      :version-index="refineVersionIndex"
+      :version-content="availableVersions[refineVersionIndex]?.content || ''"
+      :is-refining="isRefiningVersion"
+      @close="closeRefineVersionModal"
+      @refine="handleRefineVersion"
+    />
   </div>
 </template>
 
@@ -128,6 +146,8 @@ import WDVersionDetailModal from '@/components/writing-desk/WDVersionDetailModal
 import WDEvaluationDetailModal from '@/components/writing-desk/WDEvaluationDetailModal.vue'
 import WDEditChapterModal from '@/components/writing-desk/WDEditChapterModal.vue'
 import WDGenerateOutlineModal from '@/components/writing-desk/WDGenerateOutlineModal.vue'
+import WDStartCreationModal from '@/components/writing-desk/WDStartCreationModal.vue'
+import WDVersionRefineModal from '@/components/writing-desk/WDVersionRefineModal.vue'
 
 interface Props {
   id: string
@@ -151,6 +171,15 @@ const showEditChapterModal = ref(false)
 const editingChapter = ref<ChapterOutline | null>(null)
 const isGeneratingOutline = ref(false)
 const showGenerateOutlineModal = ref(false)
+
+// 开始创作弹窗状态
+const showStartCreationModal = ref(false)
+const startCreationChapterNumber = ref<number | null>(null)
+
+// 版本微调弹窗状态
+const showVersionRefineModal = ref(false)
+const refineVersionIndex = ref<number>(0)
+const isRefiningVersion = ref(false)
 
 // 使用 store 管理 GM 面板状态
 const showGMAgentPanel = computed(() => gmPanelStore.isPanelOpen)
@@ -392,7 +421,7 @@ const selectChapter = (chapterNumber: number) => {
   closeSidebar()
 }
 
-const generateChapter = async (chapterNumber: number) => {
+const generateChapter = async (chapterNumber: number, writingNotes?: string) => {
   // 检查是否可以生成该章节
   if (!canGenerateChapter(chapterNumber) && !isChapterFailed(chapterNumber) && !hasChapterInProgress(chapterNumber)) {
     globalAlert.showError('请按顺序生成章节，先完成前面的章节', '生成受限')
@@ -423,7 +452,7 @@ const generateChapter = async (chapterNumber: number) => {
       }
     }
 
-    await novelStore.generateChapter(chapterNumber)
+    await novelStore.generateChapter(chapterNumber, writingNotes)
     
     // store 中的 project 已经被更新，所以我们不需要手动修改本地状态
     // chapterGenerationResult 也不再需要，因为 availableVersions 会从更新后的 project.chapters 中获取数据
@@ -595,6 +624,64 @@ const handleGenerateOutline = async (numChapters: number) => {
     globalAlert.showError(`生成大纲失败: ${error instanceof Error ? error.message : '未知错误'}`, '生成失败')
   } finally {
     isGeneratingOutline.value = false
+  }
+}
+
+// 开始创作弹窗相关
+const openStartCreationModal = (chapterNumber: number) => {
+  startCreationChapterNumber.value = chapterNumber
+  showStartCreationModal.value = true
+}
+
+const closeStartCreationModal = () => {
+  showStartCreationModal.value = false
+  startCreationChapterNumber.value = null
+}
+
+const handleStartCreation = async (data: { chapterNumber: number; writingNotes?: string }) => {
+  closeStartCreationModal()
+  await generateChapter(data.chapterNumber, data.writingNotes)
+}
+
+// 获取章节大纲信息
+const getChapterOutlineForModal = computed(() => {
+  if (!project.value?.blueprint?.chapter_outline || startCreationChapterNumber.value === null) {
+    return null
+  }
+  return project.value.blueprint.chapter_outline.find(
+    ch => ch.chapter_number === startCreationChapterNumber.value
+  ) || null
+})
+
+// 版本微调相关
+const openRefineVersionModal = (versionIndex: number) => {
+  refineVersionIndex.value = versionIndex
+  showVersionRefineModal.value = true
+}
+
+const closeRefineVersionModal = () => {
+  showVersionRefineModal.value = false
+  refineVersionIndex.value = 0
+  isRefiningVersion.value = false
+}
+
+const handleRefineVersion = async (data: { versionIndex: number; prompt: string }) => {
+  if (selectedChapterNumber.value === null || !project.value) return
+
+  isRefiningVersion.value = true
+  try {
+    await novelStore.refineChapterVersion(
+      selectedChapterNumber.value,
+      data.versionIndex,
+      data.prompt
+    )
+    closeRefineVersionModal()
+    globalAlert.showSuccess('版本微调完成', '操作成功')
+  } catch (error) {
+    console.error('版本微调失败:', error)
+    globalAlert.showError(`版本微调失败: ${error instanceof Error ? error.message : '未知错误'}`, '微调失败')
+  } finally {
+    isRefiningVersion.value = false
   }
 }
 

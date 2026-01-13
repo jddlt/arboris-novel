@@ -9,7 +9,7 @@
       <div v-if="canGenerate">
         <p class="text-gray-500 mb-4">点击"开始创作"按钮生成这个章节</p>
         <button
-          @click="$emit('generateChapter', chapterNumber)"
+          @click="$emit('showStartCreationModal', chapterNumber)"
           :disabled="generatingChapter === chapterNumber"
           class="px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 flex items-center gap-2 mx-auto"
         >
@@ -45,5 +45,5 @@ interface Props {
 
 defineProps<Props>()
 
-defineEmits(['generateChapter'])
+defineEmits(['showStartCreationModal'])
 </script>

@@ -796,7 +796,7 @@ class GMService:
                 "content": msg["content"],
             }
 
-            # 如果消息关联了操作，附带操作信息
+            # 如果消息关联了待执行操作（SSE 模式），附带操作信息
             if msg.get("pending_action_ids"):
                 msg_data["actions"] = [
                     {
@@ -809,6 +809,10 @@ class GMService:
                     for aid in msg["pending_action_ids"]
                     if aid in actions_map
                 ]
+
+            # 如果消息有已执行的工具记录（WebSocket 模式），直接使用
+            if msg.get("executed_tools"):
+                msg_data["executed_tools"] = msg["executed_tools"]
 
             messages.append(msg_data)
 
@@ -975,3 +979,396 @@ class GMService:
                 return content or "新对话"
 
         return "新对话"
+
+    # ========================================================================
+    # WebSocket 版本（新架构）
+    # ========================================================================
+
+    def _parse_tool_params(self, call: Dict) -> Dict[str, Any]:
+        """解析工具调用参数。"""
+        arguments = call.get("arguments") or call.get("function", {}).get("arguments")
+        if isinstance(arguments, str):
+            try:
+                return json.loads(arguments)
+            except json.JSONDecodeError:
+                return {"raw": arguments}
+        return arguments or {}
+
+    def _get_tool_name(self, call: Dict) -> Optional[str]:
+        """从工具调用中提取工具名称。"""
+        return call.get("name") or call.get("function", {}).get("name")
+
+    async def _execute_single_tool(
+        self,
+        project_id: str,
+        tool_name: str,
+        params: Dict[str, Any],
+    ) -> "ToolResult":
+        """执行单个工具。"""
+        from ...executors.gm.base import ToolResult
+
+        try:
+            executor_class = ToolRegistry.get_executor(tool_name)
+            executor = executor_class(self.session)
+
+            # 参数校验
+            error = await executor.validate_params(params)
+            if error:
+                return ToolResult(success=False, message=f"参数校验失败: {error}")
+
+            # 执行
+            return await executor.execute(project_id, params)
+
+        except ValueError as e:
+            return ToolResult(success=False, message=f"未知工具: {tool_name}")
+        except Exception as e:
+            logger.error("工具执行异常: tool=%s, error=%s", tool_name, e, exc_info=True)
+            return ToolResult(success=False, message=f"执行异常: {str(e)}")
+
+    async def websocket_chat(
+        self,
+        websocket: "WebSocket",
+        project_id: str,
+        message: str,
+        conversation_id: Optional[str] = None,
+        user_id: Optional[int] = None,
+        images: Optional[List[Dict[str, str]]] = None,
+    ) -> None:
+        """WebSocket 版本的对话，支持同步确认。
+
+        核心特性：
+        1. 只读工具自动执行
+        2. 修改工具等待用户确认后执行
+        3. 确认在同一个连接内完成，无需单独 API 调用
+        4. 执行完成后自动继续 Agent 循环
+
+        Args:
+            websocket: FastAPI WebSocket 连接
+            project_id: 小说项目 ID
+            message: 用户消息
+            conversation_id: 对话 ID（可选）
+            user_id: 用户 ID
+            images: 图片列表
+        """
+        import asyncio
+        from ...executors.gm.base import ToolResult
+        from ...schemas.gm_websocket import (
+            make_content,
+            make_tool_call,
+            make_tool_executing,
+            make_tool_result,
+            make_confirm_actions,
+            make_tool_executed,
+            make_done,
+            make_error,
+            WSClientMessageType,
+        )
+
+        MAX_ITERATIONS = 15
+
+        # 1. 获取或创建对话
+        try:
+            conversation = await self.gm_repo.get_or_create_conversation(
+                project_id, conversation_id
+            )
+        except Exception as e:
+            logger.error("创建对话失败: %s", e)
+            await websocket.send_json(make_error(f"创建对话失败: {str(e)}"))
+            return
+
+        logger.info(
+            "GM WebSocket 对话开始: project=%s, conversation=%s",
+            project_id,
+            conversation.id,
+        )
+
+        # 2. 构建上下文
+        try:
+            context = await self.context_builder.build(project_id)
+        except Exception as e:
+            logger.error("构建上下文失败: %s", e)
+            await websocket.send_json(make_error(f"构建上下文失败: {str(e)}"))
+            return
+
+        system_prompt = await self._load_system_prompt()
+        full_system_prompt = system_prompt + "\n\n---\n\n" + context
+
+        # 3. 构建对话历史
+        history = self._build_message_history(conversation.messages)
+        user_msg: Dict[str, Any] = {"role": "user", "content": message}
+        if images:
+            user_msg["images"] = images
+        history.append(user_msg)
+
+        # 保存用户消息
+        await self.gm_repo.append_message(
+            conversation_id=conversation.id,
+            role="user",
+            content=message,
+        )
+
+        tools = ToolRegistry.get_all_definitions()
+
+        # 4. Agent 循环
+        all_content = ""
+        execution_stats = {"success": 0, "failed": 0, "skipped": 0}
+        # 记录所有工具执行信息（用于保存到对话历史）
+        all_tool_executions: List[Dict[str, Any]] = []
+
+        for iteration in range(MAX_ITERATIONS):
+            logger.debug("Agent 循环第 %d 轮", iteration + 1)
+
+            # 4.1 流式调用 LLM
+            full_content = ""
+            tool_calls = []
+            # 记录流式收到的工具调用（用于立即通知前端）
+            streaming_tool_calls: List[Dict[str, Any]] = []
+
+            try:
+                async for event in self.llm_service.stream_chat_with_tools(
+                    system_prompt=full_system_prompt,
+                    messages=history,
+                    tools=tools,
+                    user_id=user_id,
+                ):
+                    event_type = event.get("type")
+
+                    if event_type == "content":
+                        await websocket.send_json(make_content(event["content"]))
+                        full_content += event["content"]
+
+                    elif event_type == "tool_call":
+                        # 立即通知前端有新的工具调用
+                        tool_call = event["tool_call"]
+                        tool_name = tool_call.get("name", "")
+                        call_id = tool_call.get("id", f"call_{len(streaming_tool_calls)}")
+
+                        # 解析参数
+                        arguments = tool_call.get("arguments", "{}")
+                        if isinstance(arguments, str):
+                            try:
+                                params = json.loads(arguments)
+                            except json.JSONDecodeError:
+                                params = {"raw": arguments}
+                        else:
+                            params = arguments or {}
+
+                        # 发送工具调用通知给前端
+                        await websocket.send_json(make_tool_call(tool_name, params, call_id))
+                        streaming_tool_calls.append({
+                            "id": call_id,
+                            "name": tool_name,
+                            "arguments": arguments,
+                        })
+                        logger.debug("流式工具调用通知: %s", tool_name)
+
+                    elif event_type == "done":
+                        full_content = event.get("content", "") or full_content
+                        tool_calls = event.get("tool_calls", [])
+
+            except Exception as e:
+                logger.error("LLM 调用失败: %s", e, exc_info=True)
+                await websocket.send_json(make_error(f"AI 服务暂时不可用: {str(e)}"))
+                return
+
+            all_content += full_content
+
+            # 4.2 没有工具调用 = 任务完成
+            if not tool_calls:
+                logger.debug("无工具调用，任务完成")
+                break
+
+            # 4.3 分类工具
+            read_only_calls = []
+            write_calls = []
+
+            for call in tool_calls:
+                tool_name = self._get_tool_name(call)
+                if not tool_name:
+                    continue
+
+                try:
+                    executor_class = ToolRegistry.get_executor(tool_name)
+                    if executor_class.is_read_only:
+                        read_only_calls.append(call)
+                    else:
+                        write_calls.append(call)
+                except ValueError:
+                    write_calls.append(call)
+
+            logger.debug(
+                "工具分类: 只读=%d, 修改=%d",
+                len(read_only_calls),
+                len(write_calls),
+            )
+
+            # 4.4 执行只读工具（自动）
+            tool_results_for_history = []
+
+            for call in read_only_calls:
+                tool_name = self._get_tool_name(call)
+                params = self._parse_tool_params(call)
+                call_id = call.get("id", f"read_{uuid4().hex[:8]}")
+
+                # 通知前端
+                await websocket.send_json(
+                    make_tool_executing(tool_name, params, f"执行 {tool_name}")
+                )
+
+                # 执行
+                result = await self._execute_single_tool(project_id, tool_name, params)
+
+                # 通知前端结果
+                result_preview = result.message
+                if len(result_preview) > 500:
+                    result_preview = result_preview[:500] + "..."
+                await websocket.send_json(
+                    make_tool_result(tool_name, result.success, result_preview)
+                )
+
+                if result.success:
+                    execution_stats["success"] += 1
+                else:
+                    execution_stats["failed"] += 1
+
+                # 构建完整结果消息
+                if result.data:
+                    result_content = f"{result.message}\n\n数据:\n{json.dumps(result.data, ensure_ascii=False, indent=2)}"
+                else:
+                    result_content = result.message
+
+                tool_results_for_history.append({
+                    "call_id": call_id,
+                    "tool_name": tool_name,
+                    "params": params,
+                    "content": result_content,
+                    "status": "success" if result.success else "failed",
+                    "message": result_preview,
+                })
+
+            # 4.5 处理修改工具（保存到数据库，不阻塞等待确认）
+            # 采用与 SSE 模式一致的策略：保存 pending_actions 到数据库，
+            # 前端通过 /apply API 确认执行，刷新后操作仍然存在
+
+            if write_calls:
+                # 使用现有的 _create_pending_actions 方法保存到数据库
+                pending_actions, normalized_tool_calls = await self._create_pending_actions(
+                    conversation.id,
+                    len(conversation.messages),
+                    write_calls,
+                )
+
+                # 发送确认请求（不阻塞等待，前端通过 /apply API 确认）
+                await websocket.send_json(
+                    make_confirm_actions(
+                        [
+                            {
+                                "action_id": a.action_id,
+                                "tool_name": a.tool_name,
+                                "params": a.params,
+                                "preview": a.preview,
+                                "is_dangerous": getattr(
+                                    ToolRegistry.get_executor(a.tool_name), "is_dangerous", False
+                                ) if a.tool_name else False,
+                            }
+                            for a in pending_actions
+                        ],
+                        timeout_ms=0,  # 0 表示无超时限制
+                    )
+                )
+
+                # 保存 assistant 消息（包含 pending_action_ids）
+                pending_action_ids = [a.action_id for a in pending_actions]
+                await self.gm_repo.append_message(
+                    conversation_id=conversation.id,
+                    role="assistant",
+                    content=all_content + full_content,
+                    tool_calls=normalized_tool_calls if normalized_tool_calls else None,
+                    pending_action_ids=pending_action_ids if pending_action_ids else None,
+                    executed_tools=all_tool_executions if all_tool_executions else None,
+                )
+                await self.session.commit()
+
+                # 发送完成消息，标记需要确认
+                await websocket.send_json(
+                    make_done(
+                        conversation_id=conversation.id,
+                        message=all_content + full_content,
+                        summary=execution_stats if any(execution_stats.values()) else None,
+                    )
+                )
+
+                logger.info(
+                    "GM WebSocket 对话完成（等待确认）: project=%s, conversation=%s, pending=%d",
+                    project_id,
+                    conversation.id,
+                    len(pending_actions),
+                )
+                return  # 结束，不继续 Agent 循环
+
+            # 4.6 更新对话历史（只有只读工具的情况）
+            all_tool_results = tool_results_for_history
+
+            if all_tool_results:
+                # 添加 assistant 消息
+                history.append({
+                    "role": "assistant",
+                    "content": full_content,
+                    "tool_calls": [
+                        {
+                            "id": r["call_id"],
+                            "type": "function",
+                            "function": {
+                                "name": r["tool_name"],
+                                "arguments": "{}",
+                            },
+                        }
+                        for r in all_tool_results
+                    ],
+                })
+
+                # 添加 tool 结果消息
+                for r in all_tool_results:
+                    history.append({
+                        "role": "tool",
+                        "tool_call_id": r["call_id"],
+                        "content": r["content"],
+                    })
+
+                # 累积工具执行信息（用于保存到对话历史，格式与前端 ToolExecution 一致）
+                for r in all_tool_results:
+                    all_tool_executions.append({
+                        "tool_name": r["tool_name"],
+                        "params": r.get("params", {}),
+                        "status": r.get("status", "success"),
+                        "message": r.get("message", r["content"][:200] if len(r["content"]) > 200 else r["content"]),
+                        "preview": r.get("preview"),
+                    })
+
+            # 继续下一轮循环
+
+        # 5. 保存最终的 assistant 消息（包含工具执行记录）
+        if all_content or all_tool_executions:
+            await self.gm_repo.append_message(
+                conversation_id=conversation.id,
+                role="assistant",
+                content=all_content,
+                executed_tools=all_tool_executions if all_tool_executions else None,
+            )
+        await self.session.commit()
+
+        # 6. 发送完成消息
+        await websocket.send_json(
+            make_done(
+                conversation_id=conversation.id,
+                message=all_content,
+                summary=execution_stats if any(execution_stats.values()) else None,
+            )
+        )
+
+        logger.info(
+            "GM WebSocket 对话完成: project=%s, conversation=%s, stats=%s",
+            project_id,
+            conversation.id,
+            execution_stats,
+        )

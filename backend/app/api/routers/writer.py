@@ -18,6 +18,7 @@ from ...schemas.novel import (
     GenerateChapterRequest,
     GenerateOutlineRequest,
     NovelProject as NovelProjectSchema,
+    RefineVersionRequest,
     SelectVersionRequest,
     UpdateChapterOutlineRequest,
 )
@@ -28,7 +29,7 @@ from ...services.llm_service import LLMService
 from ...services.novel_service import NovelService
 from ...services.prompt_service import PromptService
 from ...services.vector_store_service import VectorStoreService
-from ...utils.json_utils import remove_think_tags, unwrap_markdown_json
+from ...utils.json_utils import remove_think_tags, unwrap_markdown_json, strip_markdown_fences
 from ...repositories.system_config_repository import SystemConfigRepository
 
 router = APIRouter(prefix="/api/writer", tags=["Writer"])
@@ -296,14 +297,16 @@ async def generate_chapter(
     for variant in raw_versions:
         if isinstance(variant, dict):
             if "content" in variant and isinstance(variant["content"], str):
-                contents.append(variant["content"])
+                contents.append(strip_markdown_fences(variant["content"]))
             elif "chapter_content" in variant:
-                contents.append(str(variant["chapter_content"]))
+                contents.append(strip_markdown_fences(str(variant["chapter_content"])))
+            elif "full_content" in variant:
+                contents.append(strip_markdown_fences(str(variant["full_content"])))
             else:
-                contents.append(json.dumps(variant, ensure_ascii=False))
+                contents.append(strip_markdown_fences(json.dumps(variant, ensure_ascii=False)))
             metadata.append(variant)
         else:
-            contents.append(str(variant))
+            contents.append(strip_markdown_fences(str(variant)))
             metadata.append({"raw": variant})
 
     await novel_service.replace_chapter_versions(chapter, contents, metadata)
@@ -683,3 +686,99 @@ async def edit_chapter(
         logger.info("项目 %s 第 %s 章更新内容已同步至向量库", project_id, chapter.chapter_number)
 
     return await novel_service.get_project_schema(project_id, current_user.id)
+
+
+@router.post("/novels/{project_id}/chapters/refine", response_model=NovelProjectSchema)
+async def refine_chapter_version(
+    project_id: str,
+    request: RefineVersionRequest,
+    session: AsyncSession = Depends(get_session),
+    current_user: UserInDB = Depends(get_current_user),
+) -> NovelProjectSchema:
+    """基于现有版本内容，根据用户指令微调生成新版本。"""
+    novel_service = NovelService(session)
+    prompt_service = PromptService(session)
+    llm_service = LLMService(session)
+
+    project = await novel_service.ensure_project_owner(project_id, current_user.id)
+    logger.info(
+        "用户 %s 请求微调项目 %s 第 %s 章的版本 %s",
+        current_user.id,
+        project_id,
+        request.chapter_number,
+        request.version_index,
+    )
+
+    chapter = next((ch for ch in project.chapters if ch.chapter_number == request.chapter_number), None)
+    if not chapter:
+        logger.warning("项目 %s 未找到第 %s 章，无法微调", project_id, request.chapter_number)
+        raise HTTPException(status_code=404, detail="章节不存在")
+
+    if not chapter.versions:
+        logger.warning("项目 %s 第 %s 章无版本可微调", project_id, request.chapter_number)
+        raise HTTPException(status_code=400, detail="无可微调的版本")
+
+    sorted_versions = sorted(chapter.versions, key=lambda v: v.created_at)
+    if request.version_index < 0 or request.version_index >= len(sorted_versions):
+        logger.warning(
+            "项目 %s 第 %s 章版本索引 %s 越界，总共 %s 个版本",
+            project_id,
+            request.chapter_number,
+            request.version_index,
+            len(sorted_versions),
+        )
+        raise HTTPException(status_code=400, detail="版本索引越界")
+
+    original_version = sorted_versions[request.version_index]
+    original_content = original_version.content or ""
+
+    # 获取微调提示词，若不存在则使用默认模板
+    refine_prompt = await prompt_service.get_prompt("refine")
+    if not refine_prompt:
+        refine_prompt = """你是一位专业的小说编辑，需要根据用户的指令对章节内容进行微调。
+
+请保持原文的整体结构和风格，只根据用户的具体要求进行修改。
+
+输出格式要求：
+- 直接输出修改后的完整章节内容
+- 不要添加任何解释或说明
+- 保持原文的叙事视角和时态"""
+
+    refine_input = f"""[原始章节内容]
+{original_content}
+
+[用户微调指令]
+{request.refinement_prompt}
+
+请根据上述指令对章节内容进行微调，输出完整的修改后内容。"""
+
+    try:
+        response = await llm_service.get_llm_response(
+            system_prompt=refine_prompt,
+            conversation_history=[{"role": "user", "content": refine_input}],
+            temperature=0.7,
+            user_id=current_user.id,
+            timeout=600.0,
+        )
+        refined_content = strip_markdown_fences(remove_think_tags(response))
+    except Exception as exc:
+        logger.exception(
+            "项目 %s 第 %s 章微调版本时发生异常: %s",
+            project_id,
+            request.chapter_number,
+            exc,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"微调版本失败: {str(exc)[:200]}"
+        )
+
+    # 将新版本追加到章节版本列表
+    await novel_service.add_chapter_version(chapter, refined_content, {"refined_from": request.version_index})
+    logger.info(
+        "项目 %s 第 %s 章微调完成，已新增版本",
+        project_id,
+        request.chapter_number,
+    )
+
+    return await _load_project_schema(novel_service, project_id, current_user.id)

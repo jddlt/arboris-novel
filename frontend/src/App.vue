@@ -3,7 +3,7 @@ import { computed, watch } from 'vue'
 import { RouterView, useRoute } from 'vue-router'
 import { NMessageProvider } from 'naive-ui'
 import CustomAlert from '@/components/CustomAlert.vue'
-import GMAgentPanel from '@/components/GMAgentPanel.vue'
+import GMAgentPanelWS from '@/components/GMAgentPanelWS.vue'
 import { globalAlert } from '@/composables/useAlert'
 import { useGMPanelStore } from '@/stores/gmPanel'
 import { useNovelStore } from '@/stores/novel'
@@ -54,11 +54,11 @@ async function handleRefresh() {
       <!-- 全局 AI 助手面板 -->
       <aside
         v-if="isProjectRoute && currentProjectId"
-        class="fixed right-0 top-0 bottom-0 z-30 w-[520px] bg-white border-l border-slate-200/60 transform transition-transform duration-300 ease-out"
+        class="fixed right-0 top-0 bottom-0 z-30 w-[450px] min-[1600px]:w-[520px] bg-white border-l border-slate-200/60 transform transition-transform duration-300 ease-out"
         :class="showGMAgentPanel ? 'translate-x-0' : 'translate-x-full'"
       >
         <!-- 使用 v-show 保持组件挂载，避免请求中断 -->
-        <GMAgentPanel
+        <GMAgentPanelWS
           v-show="showGMAgentPanel"
           :project-id="currentProjectId"
           @close="gmPanelStore.closePanel()"

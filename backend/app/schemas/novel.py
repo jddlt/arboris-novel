@@ -195,3 +195,9 @@ class BlueprintPatch(BaseModel):
 class EditChapterRequest(BaseModel):
     chapter_number: int
     content: str
+
+
+class RefineVersionRequest(BaseModel):
+    chapter_number: int
+    version_index: int
+    refinement_prompt: str = Field(description="微调指令，描述如何修改当前版本")

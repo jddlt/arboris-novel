@@ -259,6 +259,8 @@ class NovelService:
         record.one_sentence_summary = blueprint.one_sentence_summary
         record.full_synopsis = blueprint.full_synopsis
         record.world_setting = blueprint.world_setting
+        record.volumes = blueprint.volumes
+        record.foreshadowing = blueprint.foreshadowing
 
         await self.session.execute(delete(BlueprintCharacter).where(BlueprintCharacter.project_id == project_id))
         for index, data in enumerate(blueprint.characters):
@@ -303,6 +305,7 @@ class NovelService:
                     chapter_number=outline.chapter_number,
                     title=outline.title,
                     summary=outline.summary,
+                    volume_id=outline.volume_id,
                 )
             )
 
@@ -432,6 +435,26 @@ class NovelService:
         await self.session.refresh(chapter)
         await self._touch_project(chapter.project_id)
         return versions
+
+    async def add_chapter_version(self, chapter: Chapter, content: str, metadata: Optional[Dict] = None) -> ChapterVersion:
+        """向章节追加新版本，用于微调等场景。"""
+        text_content = _normalize_version_content(content, metadata)
+        # 获取现有版本数量以生成版本标签
+        stmt = select(ChapterVersion).where(ChapterVersion.chapter_id == chapter.id)
+        result = await self.session.execute(stmt)
+        existing_count = len(result.scalars().all())
+        version = ChapterVersion(
+            chapter_id=chapter.id,
+            content=text_content,
+            metadata=None,
+            version_label=f"v{existing_count + 1}",
+        )
+        self.session.add(version)
+        chapter.status = ChapterGenerationStatus.WAITING_FOR_CONFIRM.value
+        await self.session.commit()
+        await self.session.refresh(chapter)
+        await self._touch_project(chapter.project_id)
+        return version
 
     async def select_chapter_version(self, chapter: Chapter, version_index: int) -> ChapterVersion:
         stmt = select(ChapterVersion).where(ChapterVersion.chapter_id == chapter.id).order_by(ChapterVersion.created_at)

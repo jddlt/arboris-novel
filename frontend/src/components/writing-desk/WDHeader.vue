@@ -1,10 +1,10 @@
 <template>
   <div
-    class="flex-shrink-0 z-30 bg-white/80 backdrop-blur-lg border-b border-gray-200 shadow-sm transition-all duration-300"
-    :class="showGMAgentPanel ? 'lg:mr-[520px]' : ''"
+    class="flex-shrink-0 z-30 h-16 bg-white/80 backdrop-blur-lg border-b border-gray-200 shadow-sm transition-all duration-300"
+    :class="showGMAgentPanel ? 'mr-[450px] min-[1600px]:mr-[520px]' : ''"
   >
-    <div class="px-4 sm:px-6 lg:px-8">
-      <div class="flex items-center justify-between h-16">
+    <div class="px-4 sm:px-6 lg:px-8 h-full">
+      <div class="flex items-center justify-between h-full">
         <!-- 左侧：项目信息 -->
         <div class="flex items-center gap-2 sm:gap-4 min-w-0">
           <button

@@ -226,10 +226,13 @@ export class NovelAPI {
     })
   }
 
-  static async generateChapter(projectId: string, chapterNumber: number): Promise<NovelProject> {
+  static async generateChapter(projectId: string, chapterNumber: number, writingNotes?: string): Promise<NovelProject> {
     return request(`${WRITER_BASE}/${projectId}/chapters/generate`, {
       method: 'POST',
-      body: JSON.stringify({ chapter_number: chapterNumber })
+      body: JSON.stringify({
+        chapter_number: chapterNumber,
+        writing_notes: writingNotes
+      })
     })
   }
 
@@ -316,6 +319,22 @@ export class NovelAPI {
       body: JSON.stringify({
         chapter_number: chapterNumber,
         content: content
+      })
+    })
+  }
+
+  static async refineChapterVersion(
+    projectId: string,
+    chapterNumber: number,
+    versionIndex: number,
+    refinementPrompt: string
+  ): Promise<NovelProject> {
+    return request(`${WRITER_BASE}/${projectId}/chapters/refine`, {
+      method: 'POST',
+      body: JSON.stringify({
+        chapter_number: chapterNumber,
+        version_index: versionIndex,
+        refinement_prompt: refinementPrompt
       })
     })
   }

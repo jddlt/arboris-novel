@@ -7,7 +7,7 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -540,3 +540,90 @@ async def archive_conversation(
         current_user.id,
         conversation_id,
     )
+
+
+# ==================== WebSocket Endpoint ====================
+
+
+@router.websocket("/ws")
+async def gm_websocket(
+    websocket: "WebSocket",
+    project_id: str,
+    session: AsyncSession = Depends(get_session),
+):
+    """GM Agent WebSocket 端点。
+
+    支持同步确认的双向通信。
+
+    消息协议：
+    客户端 -> 服务端：
+    - {"type": "user_message", "message": "...", "conversation_id": "...", "images": [...]}
+    - {"type": "confirm_response", "approved": ["id1"], "rejected": ["id2"]}
+    - {"type": "cancel"}
+
+    服务端 -> 客户端：
+    - {"type": "connected", "project_id": "..."}
+    - {"type": "content", "content": "..."}
+    - {"type": "tool_executing", "tool_name": "...", "params": {...}}
+    - {"type": "tool_result", "tool_name": "...", "success": true, "message": "..."}
+    - {"type": "confirm_actions", "actions": [...], "timeout_ms": 60000}
+    - {"type": "tool_executed", "action_id": "...", "success": true, "message": "..."}
+    - {"type": "done", "conversation_id": "...", "message": "..."}
+    - {"type": "error", "error": "..."}
+    """
+    from ...schemas.gm_websocket import make_connected, make_error
+
+    await websocket.accept()
+
+    logger.info("GM WebSocket 连接: project_id=%s", project_id)
+
+    gm_service = GMService(session)
+
+    try:
+        # 发送连接成功消息
+        await websocket.send_json(make_connected(project_id))
+
+        # 主循环：等待客户端消息
+        while True:
+            try:
+                data = await websocket.receive_json()
+            except Exception as e:
+                logger.warning("WebSocket 接收消息失败: %s", e)
+                break
+
+            msg_type = data.get("type")
+
+            if msg_type == "user_message":
+                # 处理用户消息
+                message = data.get("message", "")
+                conversation_id = data.get("conversation_id")
+                images = data.get("images")
+
+                if not message.strip():
+                    await websocket.send_json(make_error("消息不能为空"))
+                    continue
+
+                # 调用 WebSocket 版本的对话方法
+                await gm_service.websocket_chat(
+                    websocket=websocket,
+                    project_id=project_id,
+                    message=message,
+                    conversation_id=conversation_id,
+                    user_id=None,  # WebSocket 暂不支持用户认证
+                    images=images,
+                )
+
+            elif msg_type == "ping":
+                await websocket.send_json({"type": "pong"})
+
+            else:
+                logger.warning("未知消息类型: %s", msg_type)
+
+    except WebSocketDisconnect:
+        logger.info("GM WebSocket 断开: project_id=%s", project_id)
+    except Exception as e:
+        logger.error("GM WebSocket 异常: project_id=%s, error=%s", project_id, e, exc_info=True)
+        try:
+            await websocket.send_json(make_error(str(e)))
+        except Exception:
+            pass

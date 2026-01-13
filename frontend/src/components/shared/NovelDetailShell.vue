@@ -2,11 +2,11 @@
   <div class="h-screen flex flex-col overflow-hidden bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/40">
     <!-- Header -->
     <header
-      class="sticky top-0 z-40 bg-white/90 backdrop-blur-lg border-b border-slate-200/60 shadow-sm transition-all duration-300"
-      :class="showGMAgentPanel && !isAdmin ? 'lg:mr-[520px]' : ''"
+      class="sticky top-0 z-40 h-16 bg-white/90 backdrop-blur-lg border-b border-slate-200/60 shadow-sm transition-all duration-300"
+      :class="showGMAgentPanel && !isAdmin ? 'mr-[450px] min-[1600px]:mr-[520px]' : ''"
     >
-      <div class="px-4 sm:px-6 lg:px-8 py-4">
-        <div class="flex items-center justify-between">
+      <div class="px-4 sm:px-6 lg:px-8 h-full">
+        <div class="flex items-center justify-between h-full">
           <!-- Left: Title & Info -->
           <div class="flex items-center gap-3 flex-1 min-w-0">
             <button
@@ -65,7 +65,7 @@
     <div class="flex w-full flex-1 min-h-0 overflow-hidden">
       <!-- Sidebar -->
       <aside
-        class="fixed left-0 top-[73px] bottom-0 z-30 w-72 bg-white/95 backdrop-blur-lg border-r border-slate-200/60 shadow-2xl transform transition-transform duration-300 ease-out lg:translate-x-0"
+        class="fixed left-0 top-16 bottom-0 z-30 w-72 bg-white/95 backdrop-blur-lg border-r border-slate-200/60 shadow-2xl transform transition-transform duration-300 ease-out lg:translate-x-0"
         :class="isSidebarOpen ? 'translate-x-0' : '-translate-x-full'"
       >
         <!-- Sidebar Header -->
@@ -125,9 +125,9 @@
       <!-- Main Content Area -->
       <div
         class="flex-1 lg:ml-72 min-h-0 flex flex-col h-full transition-all duration-300"
-        :class="showGMAgentPanel && !isAdmin ? 'lg:mr-[520px]' : ''"
+        :class="showGMAgentPanel && !isAdmin ? 'mr-[450px] min-[1600px]:mr-[520px]' : ''"
       >
-        <div class="flex-1 min-h-0 h-full px-4 sm:px-6 lg:px-8 xl:px-12 py-6 sm:py-8 flex flex-col overflow-hidden box-border">
+        <div class="flex-1 min-h-0 h-full px-4 sm:px-6 lg:px-6 xl:px-6 py-6 sm:py-8 flex flex-col overflow-hidden box-border">
           <div class="flex-1 flex flex-col min-h-0 h-full">
             <!-- Content Card -->
             <div class="flex-1 h-full bg-white/95 backdrop-blur-sm rounded-2xl border border-slate-200/60 shadow-xl p-6 sm:p-8 lg:p-10 min-h-[20rem] transition-shadow duration-300 hover:shadow-2xl flex flex-col box-border" :class="contentCardClass">
@@ -436,13 +436,15 @@ const handleResize = () => {
   isSidebarOpen.value = window.innerWidth >= 1024
 }
 
-const loadSection = async (section: SectionKey, force = false) => {
+const loadSection = async (section: SectionKey, force = false, silent = false) => {
   if (!projectId) return
   if (!force && sectionData[section]) {
     return
   }
 
-  sectionLoading[section] = true
+  if (!silent) {
+    sectionLoading[section] = true
+  }
   sectionError[section] = null
   try {
     const response: NovelSectionResponse = props.isAdmin
@@ -545,7 +547,7 @@ const handleUpdateCharacters = async (characters: any[]) => {
   try {
     const updatedProject = await NovelAPI.updateBlueprint(project.id, { characters })
     novelStore.setCurrentProject(updatedProject)
-    await loadSection('characters', true)
+    await loadSection('characters', true, true)
   } catch (error) {
     console.error('更新角色失败:', error)
   }
@@ -560,7 +562,7 @@ const handleUpdateRelationships = async (relationships: any[]) => {
   try {
     const updatedProject = await NovelAPI.updateBlueprint(project.id, { relationships })
     novelStore.setCurrentProject(updatedProject)
-    await loadSection('relationships', true)
+    await loadSection('relationships', true, true)
   } catch (error) {
     console.error('更新关系失败:', error)
   }
@@ -575,7 +577,7 @@ const handleUpdateOutline = async (chapter_outline: any[]) => {
   try {
     const updatedProject = await NovelAPI.updateBlueprint(project.id, { chapter_outline })
     novelStore.setCurrentProject(updatedProject)
-    await loadSection('chapter_outline', true)
+    await loadSection('chapter_outline', true, true)
   } catch (error) {
     console.error('更新章节大纲失败:', error)
   }
@@ -595,7 +597,7 @@ const handleUpdateWorldSetting = async (payload: { field: string; value: any[] }
     }
     const updatedProject = await NovelAPI.updateBlueprint(project.id, { world_setting: newWorldSetting })
     novelStore.setCurrentProject(updatedProject)
-    await loadSection('world_setting', true)
+    await loadSection('world_setting', true, true)
   } catch (error) {
     console.error('更新世界设定失败:', error)
   }
@@ -610,7 +612,7 @@ const handleUpdateVolumes = async (volumes: any[]) => {
   try {
     const updatedProject = await NovelAPI.updateBlueprint(project.id, { volumes: { volumes } })
     novelStore.setCurrentProject(updatedProject)
-    await loadSection('volumes', true)
+    await loadSection('volumes', true, true)
   } catch (error) {
     console.error('更新卷结构失败:', error)
   }
@@ -625,7 +627,7 @@ const handleUpdateForeshadowing = async (threads: any[]) => {
   try {
     const updatedProject = await NovelAPI.updateBlueprint(project.id, { foreshadowing: { threads } })
     novelStore.setCurrentProject(updatedProject)
-    await loadSection('foreshadowing', true)
+    await loadSection('foreshadowing', true, true)
   } catch (error) {
     console.error('更新伏笔系统失败:', error)
   }
@@ -662,9 +664,9 @@ const handleSave = async (data: { field: string; content: any }) => {
     const updatedProject = await NovelAPI.updateBlueprint(project.id, payload)
     novelStore.setCurrentProject(updatedProject)
     const sectionToReload = resolveSectionKey(field)
-    await loadSection(sectionToReload, true)
+    await loadSection(sectionToReload, true, true)
     if (sectionToReload !== 'overview') {
-      await loadSection('overview', true)
+      await loadSection('overview', true, true)
     }
     isModalOpen.value = false
   } catch (error) {
@@ -707,7 +709,7 @@ const saveNewChapter = async () => {
   try {
     const updatedProject = await NovelAPI.updateBlueprint(project.id, { chapter_outline: newOutline })
     novelStore.setCurrentProject(updatedProject)
-    await loadSection('chapter_outline', true)
+    await loadSection('chapter_outline', true, true)
     isAddChapterModalOpen.value = false
   } catch (error) {
     console.error('新增章节失败:', error)
