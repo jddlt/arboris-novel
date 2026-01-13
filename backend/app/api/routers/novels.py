@@ -180,6 +180,8 @@ async def converse_with_concept(
     )
     llm_response = remove_think_tags(llm_response)
 
+    normalized: str = ""
+    sanitized: str = ""
     try:
         normalized = unwrap_markdown_json(llm_response)
         sanitized = sanitize_json_like_text(normalized)
@@ -191,8 +193,8 @@ async def converse_with_concept(
             current_user.id,
             exc,
             llm_response[:1000],
-            normalized[:1000] if 'normalized' in locals() else "N/A",
-            sanitized[:1000] if 'sanitized' in locals() else "N/A",
+            normalized[:1000] if normalized else "N/A",
+            sanitized[:1000] if sanitized else "N/A",
         )
         raise HTTPException(
             status_code=500,

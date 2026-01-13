@@ -508,6 +508,7 @@ interface ChapterItem {
   summary?: string | null
   content?: string | null
   word_count?: number
+  volume_id?: number | null
 }
 
 interface ChapterDetail extends ChapterItem {

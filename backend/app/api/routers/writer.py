@@ -97,7 +97,7 @@ async def generate_chapter(
         completed_chapters.append(
             {
                 "chapter_number": existing.chapter_number,
-                "title": outlines_map.get(existing.chapter_number).title if outlines_map.get(existing.chapter_number) else f"第{existing.chapter_number}章",
+                "title": (ch_outline.title if (ch_outline := outlines_map.get(existing.chapter_number)) else f"第{existing.chapter_number}章"),
                 "summary": existing.real_summary,
             }
         )
@@ -107,6 +107,8 @@ async def generate_chapter(
             previous_tail_excerpt = _extract_tail_excerpt(existing.selected_version.content)
 
     project_schema = await novel_service._serialize_project(project)
+    if not project_schema.blueprint:
+        raise HTTPException(status_code=400, detail="项目蓝图不存在，请先生成蓝图")
     blueprint_dict = project_schema.blueprint.model_dump()
 
     if "relationships" in blueprint_dict and blueprint_dict["relationships"]:
@@ -432,6 +434,8 @@ async def evaluate_chapter(
         raise HTTPException(status_code=500, detail="缺少评估提示词，请联系管理员配置 'evaluation' 提示词")
 
     project_schema = await novel_service._serialize_project(project)
+    if not project_schema.blueprint:
+        raise HTTPException(status_code=400, detail="项目蓝图不存在，请先生成蓝图")
     blueprint_dict = project_schema.blueprint.model_dump()
 
     versions_to_evaluate = [
@@ -486,6 +490,8 @@ async def generate_chapter_outline(
         raise HTTPException(status_code=500, detail="缺少大纲提示词，请联系管理员配置 'outline' 提示词")
 
     project_schema = await novel_service.get_project_schema(project_id, current_user.id)
+    if not project_schema.blueprint:
+        raise HTTPException(status_code=400, detail="项目蓝图不存在，请先生成蓝图")
     blueprint_dict = project_schema.blueprint.model_dump()
 
     payload = {

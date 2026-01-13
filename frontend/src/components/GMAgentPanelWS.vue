@@ -990,7 +990,7 @@ function renderMarkdown(content: string): string {
 
 // 长内容相关函数
 function isLongContent(content: string): boolean {
-  return content && content.length > LONG_CONTENT_THRESHOLD
+  return !!content && content.length > LONG_CONTENT_THRESHOLD
 }
 
 function truncateContent(content: string): string {
