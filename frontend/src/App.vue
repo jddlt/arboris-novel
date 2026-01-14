@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
 import { RouterView, useRoute } from 'vue-router'
-import { NMessageProvider } from 'naive-ui'
+import { NMessageProvider, NDialogProvider } from 'naive-ui'
 import CustomAlert from '@/components/CustomAlert.vue'
 import GMAgentPanelWS from '@/components/GMAgentPanelWS.vue'
 import { globalAlert } from '@/composables/useAlert'
@@ -47,7 +47,8 @@ async function handleRefresh() {
 </script>
 
 <template>
-  <n-message-provider>
+  <n-dialog-provider>
+    <n-message-provider>
     <div>
       <RouterView />
 
@@ -82,7 +83,8 @@ async function handleRefresh() {
         @close="globalAlert.closeAlert(alert.id, false)"
       />
     </div>
-  </n-message-provider>
+    </n-message-provider>
+  </n-dialog-provider>
 </template>
 
 <style scoped>

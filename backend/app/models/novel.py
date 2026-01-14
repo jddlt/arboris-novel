@@ -67,6 +67,13 @@ class NovelProject(Base):
         cascade="all, delete-orphan",
         order_by="GMConversation.updated_at.desc()",
     )
+    # 作者备忘录
+    author_notes: Mapped[list["AuthorNote"]] = relationship(
+        "AuthorNote",
+        back_populates="project",
+        cascade="all, delete-orphan",
+        order_by="AuthorNote.created_at.desc()",
+    )
 
 
 class NovelConversation(Base):
@@ -129,6 +136,15 @@ class BlueprintCharacter(Base):
     position: Mapped[int] = mapped_column(Integer, default=0)
 
     project: Mapped[NovelProject] = relationship(back_populates="characters")
+    # 角色秘密（作者备忘）
+    secrets: Mapped[list["AuthorNote"]] = relationship(
+        "AuthorNote", back_populates="character", cascade="all, delete-orphan"
+    )
+    # 角色状态快照
+    states: Mapped[list["CharacterState"]] = relationship(
+        "CharacterState", back_populates="character", cascade="all, delete-orphan",
+        order_by="CharacterState.chapter_number"
+    )
 
 
 class BlueprintRelationship(Base):
@@ -216,6 +232,10 @@ class Chapter(Base):
     )
     evaluations: Mapped[list["ChapterEvaluation"]] = relationship(
         back_populates="chapter", cascade="all, delete-orphan", order_by="ChapterEvaluation.created_at"
+    )
+    # 生成上下文记录
+    generation_contexts: Mapped[list["GenerationContext"]] = relationship(
+        "GenerationContext", back_populates="chapter", cascade="all, delete-orphan"
     )
 
 

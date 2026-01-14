@@ -17,25 +17,61 @@
           </svg>
         </button>
       </div>
-      <p class="text-slate-800 text-lg leading-relaxed min-h-[2.5rem]">{{ data?.one_sentence_summary || '暂无' }}</p>
+      <p class="text-slate-800 text-lg leading-relaxed min-h-[2.5rem] whitespace-pre-line">{{ data?.one_sentence_summary || '暂无' }}</p>
     </div>
 
     <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-      <div class="bg-white/95 rounded-2xl shadow-sm border border-slate-200 p-4">
+      <div class="bg-white/95 rounded-2xl shadow-sm border border-slate-200 p-4 group relative">
+        <button
+          v-if="editable"
+          type="button"
+          class="absolute top-3 right-3 text-gray-300 hover:text-indigo-600 transition-colors opacity-0 group-hover:opacity-100"
+          @click="emitEdit('target_audience', '目标受众', data?.target_audience)">
+          <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+            <path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z" />
+          </svg>
+        </button>
         <h4 class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">目标受众</h4>
-        <p class="text-base font-medium text-slate-800 min-h-[1.5rem]">{{ data?.target_audience || '暂无' }}</p>
+        <p class="text-base font-medium text-slate-800 min-h-[1.5rem] whitespace-pre-line">{{ data?.target_audience || '暂无' }}</p>
       </div>
-      <div class="bg-white/95 rounded-2xl shadow-sm border border-slate-200 p-4">
+      <div class="bg-white/95 rounded-2xl shadow-sm border border-slate-200 p-4 group relative">
+        <button
+          v-if="editable"
+          type="button"
+          class="absolute top-3 right-3 text-gray-300 hover:text-indigo-600 transition-colors opacity-0 group-hover:opacity-100"
+          @click="emitEdit('genre', '类型', data?.genre)">
+          <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+            <path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z" />
+          </svg>
+        </button>
         <h4 class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">类型</h4>
-        <p class="text-base font-medium text-slate-800 min-h-[1.5rem]">{{ data?.genre || '暂无' }}</p>
+        <p class="text-base font-medium text-slate-800 min-h-[1.5rem] whitespace-pre-line">{{ data?.genre || '暂无' }}</p>
       </div>
-      <div class="bg-white/95 rounded-2xl shadow-sm border border-slate-200 p-4">
+      <div class="bg-white/95 rounded-2xl shadow-sm border border-slate-200 p-4 group relative">
+        <button
+          v-if="editable"
+          type="button"
+          class="absolute top-3 right-3 text-gray-300 hover:text-indigo-600 transition-colors opacity-0 group-hover:opacity-100"
+          @click="emitEdit('style', '风格', data?.style)">
+          <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+            <path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z" />
+          </svg>
+        </button>
         <h4 class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">风格</h4>
-        <p class="text-base font-medium text-slate-800 min-h-[1.5rem]">{{ data?.style || '暂无' }}</p>
+        <p class="text-base font-medium text-slate-800 min-h-[1.5rem] whitespace-pre-line">{{ data?.style || '暂无' }}</p>
       </div>
-      <div class="bg-white/95 rounded-2xl shadow-sm border border-slate-200 p-4">
+      <div class="bg-white/95 rounded-2xl shadow-sm border border-slate-200 p-4 group relative">
+        <button
+          v-if="editable"
+          type="button"
+          class="absolute top-3 right-3 text-gray-300 hover:text-indigo-600 transition-colors opacity-0 group-hover:opacity-100"
+          @click="emitEdit('tone', '基调', data?.tone)">
+          <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+            <path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z" />
+          </svg>
+        </button>
         <h4 class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">基调</h4>
-        <p class="text-base font-medium text-slate-800 min-h-[1.5rem]">{{ data?.tone || '暂无' }}</p>
+        <p class="text-base font-medium text-slate-800 min-h-[1.5rem] whitespace-pre-line">{{ data?.tone || '暂无' }}</p>
       </div>
     </div>
 

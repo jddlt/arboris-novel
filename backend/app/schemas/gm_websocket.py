@@ -27,6 +27,7 @@ class WSServerMessageType(str, Enum):
     """服务端发送的消息类型。"""
 
     CONNECTED = "connected"  # 连接成功
+    ROUND_START = "round_start"  # 新一轮 Agent 循环开始（用于前端重置流式状态）
     CONTENT = "content"  # AI 文本内容（流式）
     TOOL_CALL = "tool_call"  # AI 发起工具调用（流式，立即通知）
     TOOL_EXECUTING = "tool_executing"  # 正在执行只读工具
@@ -227,12 +228,23 @@ def make_tool_result(tool_name: str, success: bool, message: str, data: Optional
     return msg
 
 
-def make_confirm_actions(actions: List[Dict[str, Any]], timeout_ms: int = 60000) -> Dict[str, Any]:
-    """创建确认请求消息。"""
+def make_confirm_actions(
+    actions: List[Dict[str, Any]],
+    timeout_ms: int = 60000,
+    awaiting_confirmation: bool = True,
+) -> Dict[str, Any]:
+    """创建确认请求消息。
+
+    Args:
+        actions: 待确认的操作列表
+        timeout_ms: 确认超时时间（毫秒），0 表示无超时
+        awaiting_confirmation: 是否需要在确认后继续 Agent 循环
+    """
     return make_server_message(
         WSServerMessageType.CONFIRM_ACTIONS,
         actions=actions,
         timeout_ms=timeout_ms,
+        awaiting_confirmation=awaiting_confirmation,
     )
 
 
@@ -271,4 +283,12 @@ def make_error(error: str, code: Optional[str] = None, recoverable: bool = True)
         error=error,
         code=code,
         recoverable=recoverable,
+    )
+
+
+def make_round_start(round_number: int) -> Dict[str, Any]:
+    """创建新一轮开始消息。"""
+    return make_server_message(
+        WSServerMessageType.ROUND_START,
+        round=round_number,
     )

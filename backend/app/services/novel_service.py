@@ -318,6 +318,14 @@ class NovelService:
             blueprint = NovelBlueprint(project_id=project_id)
             self.session.add(blueprint)
 
+        if "target_audience" in patch:
+            blueprint.target_audience = patch["target_audience"]
+        if "genre" in patch:
+            blueprint.genre = patch["genre"]
+        if "style" in patch:
+            blueprint.style = patch["style"]
+        if "tone" in patch:
+            blueprint.tone = patch["tone"]
         if "one_sentence_summary" in patch:
             blueprint.one_sentence_summary = patch["one_sentence_summary"]
         if "full_synopsis" in patch:

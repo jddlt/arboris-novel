@@ -94,17 +94,34 @@ class UpdateBlueprintExecutor(BaseToolExecutor):
                         "properties": {
                             "core_rules": {
                                 "type": "string",
-                                "description": "核心规则设定",
+                                "description": "核心规则设定（世界运行法则）",
                             },
-                            "locations": {
+                            "key_locations": {
                                 "type": "array",
-                                "description": "主要地点列表",
+                                "description": "关键地点列表",
                                 "items": {"type": "string"},
                             },
                             "factions": {
                                 "type": "array",
                                 "description": "势力/阵营列表",
                                 "items": {"type": "string"},
+                            },
+                            "ranks": {
+                                "type": "array",
+                                "description": "境界/等级体系（如修仙境界、武道等级）",
+                                "items": {"type": "string"},
+                            },
+                            "magic_system": {
+                                "type": "string",
+                                "description": "力量体系说明（如功法、魔法、异能）",
+                            },
+                            "history": {
+                                "type": "string",
+                                "description": "世界历史背景",
+                            },
+                            "technology_level": {
+                                "type": "string",
+                                "description": "科技水平（古代/现代/未来）",
                             },
                         },
                     },

@@ -46,6 +46,8 @@ CREATE TABLE IF NOT EXISTS novel_blueprints (
     one_sentence_summary TEXT NULL,
     full_synopsis LONGTEXT NULL,
     world_setting JSON NULL,
+    volumes JSON NULL,
+    foreshadowing JSON NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_blueprints_project FOREIGN KEY (project_id) REFERENCES novel_projects(id) ON DELETE CASCADE

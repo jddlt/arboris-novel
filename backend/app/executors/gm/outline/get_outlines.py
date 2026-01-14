@@ -128,7 +128,7 @@ class GetOutlinesExecutor(BaseToolExecutor):
                 "chapter_number": outline.chapter_number,
                 "title": outline.title or f"第{outline.chapter_number}章",
                 "summary": outline.summary or "",
-                "volume_number": outline.volume_number,
+                "volume_number": outline.volume.volume_number if outline.volume else None,
                 "status": status,
             })
 

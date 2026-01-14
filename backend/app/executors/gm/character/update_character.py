@@ -111,6 +111,26 @@ class UpdateCharacterExecutor(BaseToolExecutor):
             return "新角色名称过长，最多255个字符"
         return None
 
+    def _to_string(self, value: Any) -> str:
+        """将值转换为字符串，智能合并 dict/list 为纯文本。"""
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value
+        if isinstance(value, dict):
+            # 把 dict 的值合并成文本（常见于 AI 返回结构化数据）
+            parts = []
+            for v in value.values():
+                if isinstance(v, str) and v.strip():
+                    parts.append(v.strip())
+                elif v is not None:
+                    parts.append(str(v))
+            return ' '.join(parts) if parts else ''
+        if isinstance(value, list):
+            # 把 list 的元素合并成文本
+            return '\n'.join(str(item) for item in value if item)
+        return str(value)
+
     async def execute(self, project_id: str, params: Dict[str, Any]) -> ToolResult:
         name = params["name"].strip()
 
@@ -156,17 +176,17 @@ class UpdateCharacterExecutor(BaseToolExecutor):
                 )
             character.name = new_name
 
-        # 更新其他字段
+        # 更新其他字段（Text 类型字段需要确保是字符串）
         if "identity" in params:
-            character.identity = params["identity"]
+            character.identity = self._to_string(params["identity"])
         if "personality" in params:
-            character.personality = params["personality"]
+            character.personality = self._to_string(params["personality"])
         if "goals" in params:
-            character.goals = params["goals"]
+            character.goals = self._to_string(params["goals"])
         if "abilities" in params:
-            character.abilities = params["abilities"]
+            character.abilities = self._to_string(params["abilities"])
         if "relationship_to_protagonist" in params:
-            character.relationship_to_protagonist = params["relationship_to_protagonist"]
+            character.relationship_to_protagonist = self._to_string(params["relationship_to_protagonist"])
         if "extra" in params:
             # 合并 extra 字段 - 确保是 dict 而不是 JSON 字符串
             extra_value = params["extra"]

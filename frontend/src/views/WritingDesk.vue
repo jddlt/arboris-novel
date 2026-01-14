@@ -117,6 +117,7 @@
       :chapter-number="startCreationChapterNumber || 0"
       :chapter-title="getChapterOutlineForModal?.title"
       :chapter-summary="getChapterOutlineForModal?.summary"
+      :project-id="project?.id || ''"
       @close="closeStartCreationModal"
       @generate="handleStartCreation"
     />
@@ -421,7 +422,12 @@ const selectChapter = (chapterNumber: number) => {
   closeSidebar()
 }
 
-const generateChapter = async (chapterNumber: number, writingNotes?: string) => {
+const generateChapter = async (
+  chapterNumber: number,
+  writingNotes?: string,
+  selectedNoteIds?: number[],
+  selectedStateIds?: number[]
+) => {
   // 检查是否可以生成该章节
   if (!canGenerateChapter(chapterNumber) && !isChapterFailed(chapterNumber) && !hasChapterInProgress(chapterNumber)) {
     globalAlert.showError('请按顺序生成章节，先完成前面的章节', '生成受限')
@@ -452,7 +458,7 @@ const generateChapter = async (chapterNumber: number, writingNotes?: string) => 
       }
     }
 
-    await novelStore.generateChapter(chapterNumber, writingNotes)
+    await novelStore.generateChapter(chapterNumber, writingNotes, selectedNoteIds, selectedStateIds)
     
     // store 中的 project 已经被更新，所以我们不需要手动修改本地状态
     // chapterGenerationResult 也不再需要，因为 availableVersions 会从更新后的 project.chapters 中获取数据
@@ -504,6 +510,17 @@ const selectVersion = async (versionIndex: number) => {
     // showVersionSelector.value = false
     chapterGenerationResult.value = null
     globalAlert.showSuccess('版本已确认', '操作成功')
+
+    // 如果有角色，提示更新角色状态
+    if (project.value?.blueprint?.characters && project.value.blueprint.characters.length > 0) {
+      setTimeout(() => {
+        globalAlert.showAlert(
+          `第${selectedChapterNumber.value}章已完成，如有角色属性变化请前往"作者备忘"更新角色状态`,
+          'info',
+          '更新提醒'
+        )
+      }, 1500)
+    }
   } catch (error) {
     console.error('选择章节版本失败:', error)
     // 错误状态下恢复章节状态
@@ -638,9 +655,14 @@ const closeStartCreationModal = () => {
   startCreationChapterNumber.value = null
 }
 
-const handleStartCreation = async (data: { chapterNumber: number; writingNotes?: string }) => {
+const handleStartCreation = async (data: {
+  chapterNumber: number
+  writingNotes?: string
+  selectedNoteIds?: number[]
+  selectedStateIds?: number[]
+}) => {
   closeStartCreationModal()
-  await generateChapter(data.chapterNumber, data.writingNotes)
+  await generateChapter(data.chapterNumber, data.writingNotes, data.selectedNoteIds, data.selectedStateIds)
 }
 
 // 获取章节大纲信息

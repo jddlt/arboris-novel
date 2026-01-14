@@ -696,6 +696,23 @@ class LLMService:
                                 logger.warning("无法解析 Gemini SSE 数据: %s", data_str[:200])
                                 continue
 
+                            # ★ 检查 Gemini 错误响应
+                            if "error" in data:
+                                error_info = data["error"]
+                                logger.error("Gemini API 错误: %s", error_info)
+                                raise HTTPException(
+                                    status_code=error_info.get("code", 500),
+                                    detail=error_info.get("message", "Gemini API 错误")
+                                )
+
+                            # ★ 检查 promptFeedback（安全过滤）
+                            prompt_feedback = data.get("promptFeedback")
+                            if prompt_feedback:
+                                block_reason = prompt_feedback.get("blockReason")
+                                if block_reason:
+                                    logger.warning("Gemini 拒绝请求: blockReason=%s", block_reason)
+                                    yield {"type": "content", "content": f"\n\n[请求被 Gemini 安全过滤器拦截: {block_reason}]"}
+
                             # 检查是否有 finishReason
                             candidates = data.get("candidates", [])
                             for candidate in candidates:
@@ -718,6 +735,7 @@ class LLMService:
                                     # 文本内容
                                     if "text" in part:
                                         text = part["text"]
+                                        logger.info("Gemini text value: repr=%r len=%d", text[:200] if len(text) > 200 else text, len(text))
                                         full_content += text
                                         yield {"type": "content", "content": text}
                                         logger.debug("Gemini 返回文本: %s...", text[:100] if len(text) > 100 else text)
@@ -832,10 +850,14 @@ class LLMService:
                 # 添加图片内容
                 if images:
                     for img in images:
+                        mime_type = img.get("mime_type") or img.get("mimeType") or "image/png"
+                        base64_data = img.get("base64") or img.get("data") or ""
+                        if not mime_type:
+                            logger.warning("图片缺少 mime_type: %s", list(img.keys()))
                         parts.append({
                             "inline_data": {
-                                "mime_type": img.get("mime_type", "image/png"),
-                                "data": img.get("base64", "")
+                                "mime_type": mime_type,
+                                "data": base64_data
                             }
                         })
 

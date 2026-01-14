@@ -199,12 +199,21 @@
             </svg>
           </button>
           <div class="max-w-[80%] bg-indigo-600 text-white px-4 py-2 rounded-2xl rounded-tr-sm">
-            {{ msg.content }}
+            <!-- 图片预览 -->
+            <div v-if="msg.images && msg.images.length > 0" class="flex flex-wrap gap-1 mb-2">
+              <img
+                v-for="(img, imgIdx) in msg.images"
+                :key="imgIdx"
+                :src="`data:${img.mime_type};base64,${img.base64}`"
+                class="w-20 h-20 object-cover rounded-lg"
+              />
+            </div>
+            <span v-if="msg.content">{{ msg.content }}</span>
           </div>
         </div>
 
         <!-- AI 消息 -->
-        <div v-else class="flex justify-start">
+        <div v-else class="flex justify-start group/msg">
           <div class="max-w-[85%]">
             <!-- 工具执行记录（过滤掉系统工具） -->
             <div v-if="getVisibleTools(msg.tools).length > 0" class="mb-2">
@@ -217,6 +226,19 @@
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                 </svg>
                 执行了 {{ getVisibleTools(msg.tools).length }} 个工具
+                <!-- 成功/失败统计 -->
+                <span v-if="getToolStats(msg.tools).success > 0" class="flex items-center gap-0.5 text-green-600">
+                  <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
+                  </svg>
+                  {{ getToolStats(msg.tools).success }}
+                </span>
+                <span v-if="getToolStats(msg.tools).failed > 0" class="flex items-center gap-0.5 text-red-600">
+                  <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
+                  </svg>
+                  {{ getToolStats(msg.tools).failed }}
+                </span>
                 <svg
                   class="w-4 h-4 transition-transform"
                   :class="{ 'rotate-180': expandedTools.has(index) }"
@@ -234,7 +256,7 @@
                   <span
                     class="w-2 h-2 rounded-full"
                     :class="{
-                      'bg-green-500': tool.status === 'success',
+                      'bg-green-500': tool.status === 'applied' || tool.status === 'success',
                       'bg-red-500': tool.status === 'failed',
                       'bg-yellow-500 animate-pulse': tool.status === 'executing',
                     }"
@@ -293,7 +315,7 @@
                     <!-- pending 状态显示确认/拒绝按钮 -->
                     <div v-if="action.status === 'pending'" class="flex gap-1 flex-shrink-0">
                       <button
-                        @click="approveAction(action.action_id)"
+                        @click="approveAction(action.id)"
                         :disabled="isApplying"
                         class="p-1 text-green-600 hover:bg-green-50 rounded transition-colors disabled:opacity-50"
                         title="应用"
@@ -303,7 +325,7 @@
                         </svg>
                       </button>
                       <button
-                        @click="rejectAction(action.action_id)"
+                        @click="rejectAction(action.id)"
                         :disabled="isApplying"
                         class="p-1 text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50"
                         title="放弃"
@@ -337,58 +359,79 @@
                         class="text-xs"
                       >
                         <span class="text-gray-500">{{ key }}:</span>
-                        <span class="ml-1 text-gray-700">{{ formatParamValue(value) }}</span>
+                        <span class="ml-1 text-gray-700 whitespace-pre-wrap break-all">{{ formatParamValue(value) }}</span>
                       </div>
                     </div>
                   </Transition>
                 </div>
-                <!-- 批量操作按钮 -->
+                <!-- 批量操作按钮（历史消息，仅当有未处理的操作时显示） -->
                 <div
-                  v-if="msg.actions.filter(a => a.status === 'pending').length > 1"
+                  v-if="msg.actions.some(a => a.status === 'pending' || a.status === 'approved' || a.status === 'rejected') && msg.actions.some(a => a.status !== 'applied' && a.status !== 'failed')"
                   class="flex justify-end gap-2 pt-2 border-t border-gray-100"
                 >
                   <button
+                    v-if="msg.actions.filter(a => a.status === 'pending').length > 1"
                     @click="confirmAll(msg.actions)"
                     :disabled="isApplying"
-                    class="px-2 py-1 text-xs bg-green-500 text-white rounded hover:bg-green-600 transition-colors disabled:opacity-50"
+                    class="px-2 py-1 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors disabled:opacity-50"
                   >
-                    全部应用 ({{ msg.actions.filter(a => a.status === 'pending').length }})
+                    全选
                   </button>
                   <button
+                    v-if="msg.actions.filter(a => a.status === 'pending').length > 1"
                     @click="rejectAll(msg.actions)"
                     :disabled="isApplying"
-                    class="px-2 py-1 text-xs bg-gray-400 text-white rounded hover:bg-gray-500 transition-colors disabled:opacity-50"
+                    class="px-2 py-1 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors disabled:opacity-50"
                   >
-                    全部放弃
+                    全不选
+                  </button>
+                  <button
+                    v-if="msg.actions.some(a => a.status !== 'applied' && a.status !== 'failed')"
+                    @click="submitHistoryActions(msg.actions)"
+                    :disabled="isApplying"
+                    class="px-3 py-1 text-xs text-white rounded transition-colors disabled:opacity-50"
+                    :class="msg.actions.filter(a => a.status === 'approved').length > 0 ? 'bg-indigo-500 hover:bg-indigo-600' : 'bg-gray-500 hover:bg-gray-600'"
+                  >
+                    <template v-if="msg.actions.filter(a => a.status === 'approved').length > 0">
+                      确认选择 ({{ msg.actions.filter(a => a.status === 'approved').length }})
+                    </template>
+                    <template v-else>
+                      全部放弃
+                    </template>
                   </button>
                 </div>
               </div>
+            </div>
+
+            <!-- 回溯按钮（hover 时显示） -->
+            <div
+              v-if="canRevertToMessage(index)"
+              class="mt-1 opacity-0 group-hover/msg:opacity-100 transition-opacity duration-200"
+            >
+              <button
+                @click="revertToMessage(index)"
+                :disabled="isReverting"
+                class="flex items-center gap-1 px-2 py-1 text-xs text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded transition-colors disabled:opacity-50"
+                title="回溯到此处，删除后续对话"
+              >
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+                </svg>
+                回溯到此处
+              </button>
             </div>
           </div>
         </div>
       </template>
 
       <!-- 流式内容 -->
-      <div v-if="streamingContent || isLoading" class="flex justify-start">
+      <div v-if="streamingContent || isLoading || pendingConfirm" class="flex justify-start">
         <div class="max-w-[85%]">
-          <!-- 执行中的工具（过滤掉系统工具） -->
-          <div v-if="visibleExecutingTools.length > 0" class="mb-2 space-y-1">
-            <div
-              v-for="(tool, ti) in visibleExecutingTools"
-              :key="ti"
-              class="text-xs px-3 py-2 bg-indigo-50 rounded-lg flex items-center gap-2"
-            >
-              <span
-                class="w-2 h-2 rounded-full"
-                :class="{
-                  'bg-green-500': tool.status === 'success',
-                  'bg-red-500': tool.status === 'failed',
-                  'bg-indigo-500 animate-pulse': tool.status === 'executing',
-                }"
-              ></span>
-              <span class="font-medium text-indigo-700">{{ getToolLabel(tool.tool_name) }}</span>
-              <span v-if="tool.status === 'executing'" class="text-indigo-500">执行中...</span>
-              <span v-else-if="tool.message" class="text-gray-600 truncate">{{ tool.message }}</span>
+          <!-- 执行中的工具汇总（只显示一行） -->
+          <div v-if="visibleExecutingTools.length > 0" class="mb-2">
+            <div class="text-xs px-3 py-2 bg-indigo-50 rounded-lg flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></span>
+              <span class="text-indigo-700">正在调用 {{ visibleExecutingTools.length }} 个工具...</span>
             </div>
           </div>
 
@@ -396,6 +439,124 @@
           <div v-if="streamingContent" class="bg-white px-4 py-3 rounded-2xl rounded-tl-sm shadow-sm border border-gray-100">
             <div class="prose prose-sm max-w-none" v-html="renderMarkdown(streamingContent)"></div>
             <span class="inline-block w-2 h-4 bg-indigo-500 animate-pulse ml-1"></span>
+          </div>
+
+          <!-- 待确认操作卡片 -->
+          <div v-if="pendingConfirm && pendingConfirm.actions.length > 0" class="mt-3 space-y-2">
+            <div class="text-sm font-medium text-gray-700 mb-2">待确认操作：</div>
+            <div
+              v-for="action in pendingConfirm.actions"
+              :key="action.action_id"
+              class="bg-gray-50 rounded-lg p-2.5 border border-gray-200"
+            >
+              <div class="flex items-start justify-between gap-2">
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-xs font-medium text-indigo-600">{{ getToolLabel(action.tool_name) }}</span>
+                    <!-- 展开/收起按钮 -->
+                    <button
+                      v-if="action.params && Object.keys(action.params).length > 0"
+                      @click="toggleActionDetails(action.action_id)"
+                      class="p-0.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
+                      :title="expandedActions.has(action.action_id) ? '收起详情' : '展开详情'"
+                    >
+                      <svg
+                        class="w-3 h-3 transition-transform"
+                        :class="{ 'rotate-180': expandedActions.has(action.action_id) }"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                      </svg>
+                    </button>
+                  </div>
+                  <p class="text-xs text-gray-600 mt-0.5 truncate">{{ action.preview }}</p>
+                </div>
+                <!-- pending 状态显示确认/拒绝按钮 -->
+                <div v-if="action.status === 'pending'" class="flex gap-1 flex-shrink-0">
+                  <button
+                    @click="approveAction(action.id)"
+                    :disabled="isApplying"
+                    class="p-1 text-green-600 hover:bg-green-50 rounded transition-colors disabled:opacity-50"
+                    title="应用"
+                  >
+                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                      <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+                    </svg>
+                  </button>
+                  <button
+                    @click="rejectAction(action.id)"
+                    :disabled="isApplying"
+                    class="p-1 text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50"
+                    title="放弃"
+                  >
+                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                      <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/>
+                    </svg>
+                  </button>
+                </div>
+                <!-- 非 pending 状态显示状态标签 -->
+                <span v-else :class="getStatusClass(action.status)" class="text-xs px-1.5 py-0.5 rounded flex-shrink-0">
+                  {{ getStatusLabel(action.status) }}
+                </span>
+              </div>
+              <!-- 展开的参数详情 -->
+              <Transition
+                enter-active-class="transition-all duration-200 ease-out"
+                leave-active-class="transition-all duration-150 ease-in"
+                enter-from-class="opacity-0 max-h-0"
+                leave-to-class="opacity-0 max-h-0"
+                enter-to-class="opacity-100 max-h-96"
+                leave-from-class="opacity-100 max-h-96"
+              >
+                <div
+                  v-if="expandedActions.has(action.action_id) && action.params && Object.keys(action.params).length > 0"
+                  class="mt-2 pt-2 border-t border-gray-100 space-y-1 max-h-64 overflow-y-auto"
+                >
+                  <div
+                    v-for="(value, key) in action.params"
+                    :key="key"
+                    class="text-xs"
+                  >
+                    <span class="text-gray-500">{{ key }}:</span>
+                    <span class="ml-1 text-gray-700 whitespace-pre-wrap break-all">{{ formatParamValue(value) }}</span>
+                  </div>
+                </div>
+              </Transition>
+            </div>
+            <!-- 批量操作按钮 -->
+            <div class="flex justify-end gap-2 pt-2 border-t border-gray-100">
+              <button
+                v-if="pendingConfirm.actions.filter(a => a.status === 'pending').length > 1"
+                @click="confirmAllPending"
+                :disabled="isApplying"
+                class="px-2 py-1 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors disabled:opacity-50"
+              >
+                全选
+              </button>
+              <button
+                v-if="pendingConfirm.actions.filter(a => a.status === 'pending').length > 1"
+                @click="rejectAllPending"
+                :disabled="isApplying"
+                class="px-2 py-1 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors disabled:opacity-50"
+              >
+                全不选
+              </button>
+              <button
+                @click="submitPendingActions"
+                :disabled="isApplying"
+                class="px-3 py-1 text-xs text-white rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                :class="pendingConfirm.actions.filter(a => a.status === 'approved').length > 0 ? 'bg-indigo-500 hover:bg-indigo-600' : 'bg-gray-500 hover:bg-gray-600'"
+              >
+                <template v-if="pendingConfirm.actions.filter(a => a.status === 'approved').length > 0">
+                  确认选择 ({{ pendingConfirm.actions.filter(a => a.status === 'approved').length }})
+                </template>
+                <template v-else>
+                  全部放弃
+                </template>
+              </button>
+            </div>
           </div>
 
           <!-- 加载指示器 -->
@@ -411,45 +572,46 @@
           </div>
         </div>
       </div>
-
-      <!-- 执行统计 -->
-      <div v-if="executionStats" class="flex justify-center">
-        <div class="text-xs text-gray-500 bg-gray-100 px-3 py-1 rounded-full flex items-center gap-3">
-          <span v-if="executionStats.success > 0" class="flex items-center gap-1 text-green-600">
-            <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-              <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
-            </svg>
-            {{ executionStats.success }} 成功
-          </span>
-          <span v-if="executionStats.failed > 0" class="flex items-center gap-1 text-red-600">
-            <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-              <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
-            </svg>
-            {{ executionStats.failed }} 失败
-          </span>
-          <span v-if="executionStats.skipped > 0" class="flex items-center gap-1 text-gray-500">
-            {{ executionStats.skipped }} 跳过
-          </span>
-        </div>
-      </div>
     </div>
 
     <!-- 输入区域 -->
     <div class="flex-shrink-0 p-4 bg-white border-t border-gray-200">
+      <!-- 已粘贴的图片预览 -->
+      <div v-if="pastedImages.length > 0" class="mb-2 flex flex-wrap gap-2">
+        <div
+          v-for="(img, index) in pastedImages"
+          :key="index"
+          class="relative group"
+        >
+          <img
+            :src="`data:${img.mime_type};base64,${img.base64}`"
+            class="w-16 h-16 object-cover rounded-lg border border-gray-200"
+          />
+          <button
+            @click="removeImage(index)"
+            class="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+          >
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      </div>
       <div class="flex gap-2 items-start">
         <textarea
           ref="inputRef"
           v-model="inputMessage"
           @keydown.enter.exact.prevent="sendMessage"
+          @paste="handlePaste"
           :disabled="!isConnected"
-          placeholder="输入消息..."
+          placeholder="输入消息...（可粘贴图片）"
           rows="4"
           class="flex-1 px-3 py-2 border border-gray-300 rounded-lg resize-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent disabled:bg-gray-100 text-sm"
         ></textarea>
         <div class="flex flex-col items-center gap-2">
           <button
             @click="sendMessage"
-            :disabled="!isConnected || isLoading || !inputMessage.trim()"
+            :disabled="!isConnected || isLoading || (!inputMessage.trim() && pastedImages.length === 0)"
             class="px-4 py-3 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             <svg v-if="isLoading" class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -526,7 +688,7 @@
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { marked } from 'marked'
 import { useGMWebSocket } from '@/composables/useGMWebSocket'
-import { getConversations, getConversationDetail, archiveConversation, applyActions, discardActions } from '@/api/gm'
+import { getConversations, getConversationDetail, archiveConversation, applyActions, discardActions, truncateConversation } from '@/api/gm'
 import type { ConversationSummary } from '@/api/gm'
 
 // ==================== Props & Emits ====================
@@ -556,6 +718,7 @@ const {
   connect,
   reconnect,
   sendUserMessage,
+  sendConfirmResponse,
   approveAction: wsApproveAction,
   rejectAction: wsRejectAction,
   confirmAll: wsConfirmAll,
@@ -586,12 +749,18 @@ const isLoadingHistory = ref(false)
 // 联网搜索
 const enableWebSearch = ref(false)
 
+// 粘贴图片
+const pastedImages = ref<{ base64: string; mime_type: string }[]>([])
+
 // 长内容截断相关
 const LONG_CONTENT_THRESHOLD = 500
 const fullContentModal = ref<{ show: boolean; content: string }>({ show: false, content: '' })
 
 // 操作详情展开状态
 const expandedActions = ref<Set<string>>(new Set())
+
+// 回溯状态
+const isReverting = ref(false)
 
 // ==================== 计算属性 ====================
 
@@ -613,16 +782,61 @@ const visibleExecutingTools = computed(() => {
 
 function sendMessage() {
   const message = inputMessage.value.trim()
-  if (!message || !isConnected.value || isLoading.value) return
+  if ((!message && pastedImages.value.length === 0) || !isConnected.value || isLoading.value) return
 
-  sendUserMessage(message, { enableWebSearch: enableWebSearch.value })
+  sendUserMessage(message, {
+    enableWebSearch: enableWebSearch.value,
+    images: pastedImages.value.length > 0 ? [...pastedImages.value] : undefined,
+  })
   inputMessage.value = ''
+  pastedImages.value = []
   localStorage.removeItem(INPUT_STORAGE_KEY)
 
   // 滚动到底部
   nextTick(() => {
     scrollToBottom()
   })
+}
+
+// 处理粘贴事件
+async function handlePaste(event: ClipboardEvent) {
+  const items = event.clipboardData?.items
+  if (!items) return
+
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      event.preventDefault()
+      const file = item.getAsFile()
+      if (!file) continue
+
+      // 转换为 base64
+      const base64 = await fileToBase64(file)
+      pastedImages.value.push({
+        base64,
+        mime_type: item.type,
+      })
+    }
+  }
+}
+
+// 文件转 base64
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = reader.result as string
+      // 去掉 data:image/xxx;base64, 前缀
+      const base64 = result.split(',')[1]
+      resolve(base64)
+    }
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
+
+// 移除图片
+function removeImage(index: number) {
+  pastedImages.value.splice(index, 1)
 }
 
 function clearConversation() {
@@ -633,93 +847,161 @@ function clearConversation() {
 // 是否正在应用操作
 const isApplying = ref(false)
 
-// 应用单个操作
-async function approveAction(actionId: string) {
-  wsApproveAction(actionId)  // 先更新本地状态
-  await applySelectedActions([actionId])
+// 标记单个操作为 approved（只更新本地状态）
+function approveAction(actionId: string) {
+  wsApproveAction(actionId)
 }
 
-// 拒绝单个操作（调用 discard API）
-async function rejectAction(actionId: string) {
-  wsRejectAction(actionId)  // 先更新本地状态
-  try {
-    await discardActions(props.projectId, [actionId])
-  } catch (error) {
-    console.error('放弃操作失败:', error)
+// 标记单个操作为 rejected（只更新本地状态）
+function rejectAction(actionId: string) {
+  wsRejectAction(actionId)
+}
+
+// 标记所有为 approved（用于流式区域的按钮，只更新本地状态）
+function confirmAllPending() {
+  wsConfirmAll()
+}
+
+// 标记所有为 rejected（用于流式区域的按钮，只更新本地状态）
+function rejectAllPending() {
+  wsRejectAll()
+}
+
+// 提交待确认操作（发送最终响应）
+async function submitPendingActions() {
+  if (!pendingConfirm.value) return
+
+  const approvedIds = pendingConfirm.value.actions
+    .filter(a => a.status === 'approved')
+    .map(a => a.id)
+  const rejectedIds = pendingConfirm.value.actions
+    .filter(a => a.status === 'rejected')
+    .map(a => a.id)
+
+  // 如果还有未选择的，提示用户
+  const pendingIds = pendingConfirm.value.actions
+    .filter(a => a.status === 'pending')
+    .map(a => a.id)
+
+  if (pendingIds.length > 0) {
+    // 未选择的默认拒绝
+    rejectedIds.push(...pendingIds)
   }
+
+  await applySelectedActions(approvedIds, rejectedIds)
 }
 
-// 应用所有待确认的操作
-async function confirmAll(actions?: Array<{ action_id: string; status: string }>) {
-  let pendingIds: string[] = []
-
+// 标记所有为 approved（用于历史消息中的批量操作）
+function confirmAll(actions?: Array<{ id: string; action_id?: string; status: string }>) {
   if (actions) {
     // 从传入的 actions 获取
-    pendingIds = actions.filter(a => a.status === 'pending').map(a => a.action_id)
-  } else if (pendingConfirm.value) {
-    // 从 pendingConfirm 获取
-    pendingIds = pendingConfirm.value.actions
-      .filter(a => a.status === 'pending')
-      .map(a => a.action_id)
+    const pendingIds = actions.filter(a => a.status === 'pending').map(a => a.id)
+    pendingIds.forEach(id => wsApproveAction(id))
+  } else {
+    wsConfirmAll()
   }
-
-  if (pendingIds.length === 0) return
-
-  wsConfirmAll()  // 先更新本地状态为 approved
-  await applySelectedActions(pendingIds)
 }
 
-// 拒绝所有待确认的操作
-async function rejectAll(actions?: Array<{ action_id: string; status: string }>) {
-  let pendingIds: string[] = []
-
+// 标记所有为 rejected（用于历史消息中的批量操作）
+function rejectAll(actions?: Array<{ id: string; action_id?: string; status: string }>) {
   if (actions) {
     // 从传入的 actions 获取
-    pendingIds = actions.filter(a => a.status === 'pending').map(a => a.action_id)
-  } else if (pendingConfirm.value) {
-    // 从 pendingConfirm 获取
-    pendingIds = pendingConfirm.value.actions
-      .filter(a => a.status === 'pending')
-      .map(a => a.action_id)
+    const pendingIds = actions.filter(a => a.status === 'pending').map(a => a.id)
+    pendingIds.forEach(id => wsRejectAction(id))
+  } else {
+    wsRejectAll()
   }
+}
 
-  if (pendingIds.length === 0) return
+// 提交历史消息中的操作（REST API）
+async function submitHistoryActions(actions: Array<{ id: string; action_id?: string; status: string }>) {
+  const approvedIds = actions.filter(a => a.status === 'approved').map(a => a.id)
+  const rejectedIds = actions.filter(a => a.status === 'rejected').map(a => a.id)
+  const pendingIds = actions.filter(a => a.status === 'pending').map(a => a.id)
 
-  wsRejectAll()  // 先更新本地状态
+  // 未选择的默认拒绝
+  rejectedIds.push(...pendingIds)
+
+  if (approvedIds.length === 0 && rejectedIds.length === 0) return
+
+  isApplying.value = true
   try {
-    await discardActions(props.projectId, pendingIds)
-    clearPendingConfirm()
+    if (approvedIds.length > 0) {
+      const result = await applyActions(props.projectId, approvedIds)
+      const successIds = result.results.filter(r => r.success).map(r => r.action_id)
+      const failedIds = result.results.filter(r => !r.success).map(r => r.action_id)
+      markActionsApplied(successIds)
+      markActionsFailed(failedIds)
+    }
+    if (rejectedIds.length > 0) {
+      await discardActions(props.projectId, rejectedIds)
+    }
+    emit('refresh')
   } catch (error) {
-    console.error('放弃操作失败:', error)
+    console.error('应用操作失败:', error)
+    markActionsFailed(approvedIds)
+  } finally {
+    isApplying.value = false
   }
 }
 
 // 执行选中的操作
-async function applySelectedActions(actionIds: string[]) {
-  if (actionIds.length === 0) return
+async function applySelectedActions(approvedIds: string[], rejectedIds: string[] = []) {
+  if (approvedIds.length === 0 && rejectedIds.length === 0) return
   isApplying.value = true
   try {
-    const result = await applyActions(props.projectId, actionIds)
-    // 根据结果更新状态
-    const successIds = result.results.filter(r => r.success).map(r => r.action_id)
-    const failedIds = result.results.filter(r => !r.success).map(r => r.action_id)
-
-    markActionsApplied(successIds)
-    markActionsFailed(failedIds)
-
-    // 如果所有操作都处理完了，清除 pendingConfirm
-    if (pendingConfirm.value) {
-      const stillPending = pendingConfirm.value.actions.filter(a => a.status === 'pending')
-      if (stillPending.length === 0) {
+    // 如果是当前轮次需要 WebSocket 确认的操作，通过 WebSocket 发送
+    if (pendingConfirm.value?.awaitingConfirmation) {
+      // 通过 WebSocket 发送确认响应
+      const sent = sendConfirmResponse(approvedIds, rejectedIds)
+      if (sent) {
+        // 清除 pendingConfirm（后端会继续执行并发送结果）
         clearPendingConfirm()
+        // 刷新由 watch(executionStats) 在 done 消息到达时触发
+      }
+    } else {
+      // 历史对话或刷新后的场景，使用 REST API 执行操作
+      if (approvedIds.length > 0) {
+        const result = await applyActions(props.projectId, approvedIds)
+        // 根据结果更新状态
+        const successIds = result.results.filter(r => r.success).map(r => r.action_id)
+        const failedIds = result.results.filter(r => !r.success).map(r => r.action_id)
+
+        markActionsApplied(successIds)
+        markActionsFailed(failedIds)
+      }
+
+      // 处理拒绝的操作
+      if (rejectedIds.length > 0) {
+        await discardActions(props.projectId, rejectedIds)
+      }
+
+      // 如果所有操作都处理完了，清除 pendingConfirm
+      if (pendingConfirm.value) {
+        const stillPending = pendingConfirm.value.actions.filter(a => a.status === 'pending')
+        if (stillPending.length === 0) {
+          clearPendingConfirm()
+        }
+      }
+
+      // 刷新数据
+      emit('refresh')
+
+      // ★ 历史操作确认后，自动让模型继续（如果有操作被批准）
+      console.log('[GM] 检查是否自动继续:', {
+        approvedCount: approvedIds.length,
+        isConnected: isConnected.value,
+        isLoading: isLoading.value
+      })
+      if (approvedIds.length > 0 && isConnected.value && !isLoading.value) {
+        // 发送一条"继续"消息，让模型基于已执行的操作继续
+        console.log('[GM] 发送"请继续"消息')
+        sendUserMessage('请继续', { enableWebSearch: false })
       }
     }
-
-    // 刷新数据
-    emit('refresh')
   } catch (error) {
     console.error('应用操作失败:', error)
-    markActionsFailed(actionIds)
+    markActionsFailed(approvedIds)
   } finally {
     isApplying.value = false
   }
@@ -780,6 +1062,7 @@ async function selectConversation(conv: ConversationSummary) {
       // 处理待确认操作（无论是否有 executed_tools，都可能有 actions）
       if (msg.actions && msg.actions.length > 0) {
         actions = msg.actions.map((a: { action_id: string; tool_name: string; params: Record<string, unknown>; status: string; preview?: string }) => ({
+          id: a.action_id,
           action_id: a.action_id,
           tool_name: a.tool_name,
           params: a.params,
@@ -895,7 +1178,9 @@ function getStatusLabel(status: string): string {
     approved: '已确认',
     rejected: '已拒绝',
     applied: '已应用',
+    success: '已应用',
     failed: '失败',
+    discarded: '已取消',
   }
   return labels[status] || status
 }
@@ -907,7 +1192,9 @@ function getStatusClass(status: string): string {
     approved: 'bg-blue-100 text-blue-700',
     rejected: 'bg-gray-100 text-gray-500',
     applied: 'bg-green-100 text-green-700',
+    success: 'bg-green-100 text-green-700',
     failed: 'bg-red-100 text-red-700',
+    discarded: 'bg-gray-100 text-gray-500',
   }
   return classes[status] || 'bg-gray-100 text-gray-600'
 }
@@ -928,7 +1215,8 @@ function formatParamValue(value: unknown): string {
   }
   if (typeof value === 'object') {
     const str = JSON.stringify(value, null, 2)
-    return str.length > 200 ? str.slice(0, 200) + '...' : str
+    // 展开后显示完整内容，不截断
+    return str
   }
   return String(value)
 }
@@ -940,6 +1228,15 @@ const HIDDEN_TOOLS = ['signal_task_status']
 function getVisibleTools(tools?: Array<{ tool_name: string; status: string; message?: string }>) {
   if (!tools) return []
   return tools.filter(t => !HIDDEN_TOOLS.includes(t.tool_name))
+}
+
+// 计算工具执行统计
+function getToolStats(tools?: Array<{ tool_name: string; status: string; message?: string }>) {
+  const visible = getVisibleTools(tools)
+  return {
+    success: visible.filter(t => t.status === 'applied' || t.status === 'success').length,
+    failed: visible.filter(t => t.status === 'failed').length,
+  }
 }
 
 // 重发用户消息
@@ -968,6 +1265,66 @@ function isOrphanUserMessage(index: number): boolean {
   return false
 }
 
+// ==================== 回溯功能 ====================
+
+/**
+ * 判断是否可以回溯到该消息
+ * 只有 assistant 消息且不是最后一条才能回溯
+ */
+function canRevertToMessage(index: number): boolean {
+  const msg = messages.value[index]
+  if (msg.role !== 'assistant') return false
+
+  // 不能回溯到最后一条消息（没有后续消息可删除）
+  if (index >= messages.value.length - 1) return false
+
+  // 不能在加载中或回溯中操作
+  if (isLoading.value || isReverting.value) return false
+
+  // 必须有 conversationId 才能持久化
+  if (!conversationId.value) return false
+
+  return true
+}
+
+/**
+ * 回溯到指定消息位置，删除该消息之后的所有对话
+ * @param index 消息索引（保留该消息，删除之后的）
+ */
+async function revertToMessage(index: number) {
+  if (!canRevertToMessage(index)) return
+  if (!conversationId.value) return
+
+  // 确认操作
+  const deletedCount = messages.value.length - index - 1
+  if (!confirm(`确定要回溯到此处吗？将删除后续 ${deletedCount} 条消息。`)) {
+    return
+  }
+
+  isReverting.value = true
+  try {
+    // 保留的消息数量 = index + 1（包含当前消息）
+    const keepCount = index + 1
+
+    // 调用后端 API 持久化截断
+    await truncateConversation(props.projectId, conversationId.value, keepCount)
+
+    // 更新前端状态
+    messages.value = messages.value.slice(0, keepCount)
+
+    // 清理展开状态
+    expandedTools.value.clear()
+    expandedActions.value.clear()
+
+    console.log(`[GM] 回溯成功，保留 ${keepCount} 条消息`)
+  } catch (error) {
+    console.error('回溯失败:', error)
+    alert('回溯失败，请重试')
+  } finally {
+    isReverting.value = false
+  }
+}
+
 function scrollToBottom() {
   if (messageContainer.value) {
     messageContainer.value.scrollTop = messageContainer.value.scrollHeight
@@ -976,16 +1333,27 @@ function scrollToBottom() {
 
 function renderMarkdown(content: string): string {
   if (!content) return ''
-  // 预处理：修复中文标点与 markdown 加粗语法的边界问题
-  // marked 解析器在 ** 紧邻中文引号等标点时可能无法正确识别边界
-  // 解决方案：在 ** 和中文标点之间插入零宽空格 (U+200B) 帮助解析器识别边界
-  const zwsp = '\u200B'
-  const preprocessed = content
-    // **"文字" → **\u200B"文字"
-    .replace(/\*\*([""''「」『』【】（）])/g, `**${zwsp}$1`)
-    // 文字"** → 文字"\u200B**
-    .replace(/([""''「」『』【】（）])\*\*/g, `$1${zwsp}**`)
-  return marked.parse(preprocessed, { async: false }) as string
+  // 预处理：直接将 **"..."** 模式转换为 HTML，绕过 marked 解析
+  // CommonMark 规范中，** 紧邻中文引号时不满足左侧翼定界符条件
+  // 因为 ** 前面是中文字符（非空白非标点），后面是标点，导致解析失败
+  let processed = content
+    // **"内容"** 或 **"内容"** 模式
+    .replace(/\*\*[""]([^""*]+)[""]\*\*/g, `<strong>"$1"</strong>`)
+    // **'内容'** 或 **'内容'** 模式
+    .replace(/\*\*['']([^''*]+)['']\*\*/g, `<strong>'$1'</strong>`)
+    // **「内容」** 模式
+    .replace(/\*\*「([^「」*]+)」\*\*/g, `<strong>「$1」</strong>`)
+    // **『内容』** 模式
+    .replace(/\*\*『([^『』*]+)』\*\*/g, `<strong>『$1』</strong>`)
+    // **【内容】** 模式
+    .replace(/\*\*【([^【】*]+)】\*\*/g, `<strong>【$1】</strong>`)
+    // **（内容）** 模式
+    .replace(/\*\*（([^（）*]+)）\*\*/g, `<strong>（$1）</strong>`)
+    // **《内容》** 模式
+    .replace(/\*\*《([^《》*]+)》\*\*/g, `<strong>《$1》</strong>`)
+    // **〈内容〉** 模式
+    .replace(/\*\*〈([^〈〉*]+)〉\*\*/g, `<strong>〈$1〉</strong>`)
+  return marked.parse(processed, { async: false }) as string
 }
 
 // 长内容相关函数
@@ -1042,11 +1410,13 @@ watch([messages, streamingContent], () => {
 })
 
 // 当有工具执行成功时，通知父组件刷新数据
-watch(executionStats, (stats) => {
+watch(executionStats, (stats, oldStats) => {
+  // 只在 stats 变化且有成功执行时刷新
   if (stats && stats.success > 0) {
+    console.log('[GM] 工具执行完成，刷新数据', stats)
     emit('refresh')
   }
-})
+}, { deep: true })
 
 // ==================== 生命周期 ====================
 
@@ -1105,5 +1475,9 @@ async function loadLatestConversation() {
 .prose :deep(pre code) {
   background-color: transparent;
   padding: 0;
+}
+
+.prose :deep(hr) {
+  margin: 0.75em 0;
 }
 </style>

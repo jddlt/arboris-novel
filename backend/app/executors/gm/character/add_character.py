@@ -90,6 +90,26 @@ class AddCharacterExecutor(BaseToolExecutor):
             return "角色名称过长，最多255个字符"
         return None
 
+    def _to_string(self, value: Any) -> str:
+        """将值转换为字符串，智能合并 dict/list 为纯文本。"""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return value
+        if isinstance(value, dict):
+            # 把 dict 的值合并成文本（常见于 AI 返回结构化数据）
+            parts = []
+            for v in value.values():
+                if isinstance(v, str) and v.strip():
+                    parts.append(v.strip())
+                elif v is not None:
+                    parts.append(str(v))
+            return ' '.join(parts) if parts else ''
+        if isinstance(value, list):
+            # 把 list 的元素合并成文本
+            return '\n'.join(str(item) for item in value if item)
+        return str(value)
+
     async def execute(self, project_id: str, params: Dict[str, Any]) -> ToolResult:
         name = params["name"].strip()
 
@@ -118,11 +138,11 @@ class AddCharacterExecutor(BaseToolExecutor):
         character = BlueprintCharacter(
             project_id=project_id,
             name=name,
-            identity=params.get("identity"),
-            personality=params.get("personality"),
-            goals=params.get("goals"),
-            abilities=params.get("abilities"),
-            relationship_to_protagonist=params.get("relationship_to_protagonist"),
+            identity=self._to_string(params.get("identity")),
+            personality=self._to_string(params.get("personality")),
+            goals=self._to_string(params.get("goals")),
+            abilities=self._to_string(params.get("abilities")),
+            relationship_to_protagonist=self._to_string(params.get("relationship_to_protagonist")),
             extra=params.get("extra"),
             position=max_pos + 1,
         )

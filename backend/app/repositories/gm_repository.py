@@ -131,6 +131,7 @@ class GMConversationRepository(BaseRepository[GMConversation]):
         tool_calls: Optional[List[dict]] = None,
         pending_action_ids: Optional[List[str]] = None,
         tool_call_id: Optional[str] = None,
+        tool_name: Optional[str] = None,
         executed_tools: Optional[List[dict]] = None,
     ) -> None:
         """追加消息到对话历史。
@@ -142,6 +143,7 @@ class GMConversationRepository(BaseRepository[GMConversation]):
             tool_calls: 工具调用列表（可选，仅 assistant 消息）
             pending_action_ids: 关联的待执行操作 ID（可选）
             tool_call_id: 工具调用 ID（可选，仅 tool 消息）
+            tool_name: 工具名称（可选，仅 tool 消息，Gemini 需要）
             executed_tools: 已执行的工具记录（可选，用于 WebSocket 模式）
         """
         conversation = await self.get_by_id(conversation_id)
@@ -158,6 +160,8 @@ class GMConversationRepository(BaseRepository[GMConversation]):
             message["pending_action_ids"] = pending_action_ids
         if tool_call_id:
             message["tool_call_id"] = tool_call_id
+        if tool_name:
+            message["tool_name"] = tool_name
         if executed_tools:
             message["executed_tools"] = executed_tools
 
@@ -194,6 +198,42 @@ class GMConversationRepository(BaseRepository[GMConversation]):
             .values(is_archived=True)
         )
         await self.session.execute(stmt)
+
+    async def truncate_messages(
+        self,
+        conversation_id: str,
+        keep_count: int,
+    ) -> int:
+        """截断对话消息，只保留前 N 条。
+
+        Args:
+            conversation_id: 对话 ID
+            keep_count: 保留的消息数量
+
+        Returns:
+            被删除的消息数量
+        """
+        conversation = await self.get_by_id(conversation_id)
+        if not conversation:
+            raise ValueError(f"对话 {conversation_id} 不存在")
+
+        original_count = len(conversation.messages)
+        if keep_count >= original_count:
+            return 0
+
+        # 截断消息列表
+        truncated_messages = list(conversation.messages[:keep_count])
+        conversation.messages = truncated_messages
+
+        await self.session.flush()
+        deleted_count = original_count - keep_count
+        logger.info(
+            "截断对话消息: id=%s, 保留=%d, 删除=%d",
+            conversation_id,
+            keep_count,
+            deleted_count,
+        )
+        return deleted_count
 
 
 class GMPendingActionRepository(BaseRepository[GMPendingAction]):

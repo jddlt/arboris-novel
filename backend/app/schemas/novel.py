@@ -155,6 +155,9 @@ class NovelSectionResponse(BaseModel):
 class GenerateChapterRequest(BaseModel):
     chapter_number: int
     writing_notes: Optional[str] = Field(default=None, description="章节额外写作指令")
+    # 可选的上下文选择
+    selected_note_ids: Optional[List[int]] = Field(default=None, description="选中的备忘录 ID 列表")
+    selected_state_ids: Optional[List[int]] = Field(default=None, description="选中的角色状态 ID 列表")
 
 
 class SelectVersionRequest(BaseModel):
@@ -182,6 +185,10 @@ class GenerateOutlineRequest(BaseModel):
 
 
 class BlueprintPatch(BaseModel):
+    target_audience: Optional[str] = None
+    genre: Optional[str] = None
+    style: Optional[str] = None
+    tone: Optional[str] = None
     one_sentence_summary: Optional[str] = None
     full_synopsis: Optional[str] = None
     world_setting: Optional[Dict[str, Any]] = None

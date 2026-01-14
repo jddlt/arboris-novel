@@ -6,9 +6,10 @@ import logging
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from ..base import BaseToolExecutor, ToolDefinition, ToolResult
-from ....models.novel import Volume
+from ....models.novel import Volume, ChapterOutline
 from ....services.gm.tool_registry import ToolRegistry
 
 if TYPE_CHECKING:
@@ -58,6 +59,8 @@ class GetVolumesExecutor(BaseToolExecutor):
 
         stmt = select(Volume).where(
             Volume.project_id == project_id
+        ).options(
+            selectinload(Volume.outlines)  # 预加载 outlines 关系
         ).order_by(Volume.volume_number)
 
         if volume_number is not None:

@@ -81,14 +81,16 @@
               第{{ volume.chapter_start }}章 ~ 第{{ volume.chapter_end }}章
               <span class="text-slate-400">（共{{ (volume.chapter_end || 0) - (volume.chapter_start || 0) + 1 }}章）</span>
             </p>
-            <p v-if="volume.summary" class="text-sm text-slate-600 line-clamp-2">{{ volume.summary }}</p>
-            <div v-if="volume.core_conflict || volume.climax" class="mt-2 flex flex-wrap gap-2">
-              <span v-if="volume.core_conflict" class="text-xs bg-amber-50 text-amber-700 px-2 py-1 rounded">
-                冲突：{{ volume.core_conflict }}
-              </span>
-              <span v-if="volume.climax" class="text-xs bg-rose-50 text-rose-700 px-2 py-1 rounded">
-                高潮：{{ volume.climax }}
-              </span>
+            <p v-if="volume.summary" class="text-sm text-slate-600 whitespace-pre-wrap">{{ volume.summary }}</p>
+            <div v-if="volume.core_conflict || volume.climax" class="mt-3 space-y-2">
+              <div v-if="volume.core_conflict" class="text-sm bg-amber-50 text-amber-700 px-3 py-2 rounded-lg">
+                <span class="font-medium">冲突：</span>
+                <span class="whitespace-pre-wrap">{{ volume.core_conflict }}</span>
+              </div>
+              <div v-if="volume.climax" class="text-sm bg-rose-50 text-rose-700 px-3 py-2 rounded-lg">
+                <span class="font-medium">高潮：</span>
+                <span class="whitespace-pre-wrap">{{ volume.climax }}</span>
+              </div>
             </div>
           </div>
         </div>

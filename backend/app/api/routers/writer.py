@@ -31,6 +31,8 @@ from ...services.prompt_service import PromptService
 from ...services.vector_store_service import VectorStoreService
 from ...utils.json_utils import remove_think_tags, unwrap_markdown_json, strip_markdown_fences
 from ...repositories.system_config_repository import SystemConfigRepository
+from ...repositories.author_notes_repository import AuthorNoteRepository, CharacterStateRepository
+from ...models.author_notes import GenerationContext
 
 router = APIRouter(prefix="/api/writer", tags=["Writer"])
 logger = logging.getLogger(__name__)
@@ -220,10 +222,103 @@ async def generate_chapter(
             )
     upcoming_section = "\n".join(upcoming_outlines) if upcoming_outlines else "无后续章节大纲"
 
+    # ==================== 作者备忘录和角色状态注入 ====================
+    author_notes_text = ""
+    character_states_text = ""
+    note_repo = AuthorNoteRepository(session)
+
+    # 自动获取本章、本卷、全局的备忘录
+    current_volume_id = outline.volume.id if outline.volume else None
+    auto_notes = await note_repo.list_for_chapter_generation(
+        project_id=project_id,
+        chapter_number=request.chapter_number,
+        volume_id=current_volume_id,
+    )
+
+    # 合并用户手动选中的备忘录（如果有）
+    all_note_ids = set()
+    if request.selected_note_ids:
+        all_note_ids.update(request.selected_note_ids)
+    # 添加自动获取的备忘录 ID
+    for note in auto_notes:
+        all_note_ids.add(note.id)
+
+    # 获取所有需要注入的备忘录
+    if all_note_ids:
+        all_notes = await note_repo.get_by_ids(list(all_note_ids))
+        if all_notes:
+            notes_lines = []
+            for note in all_notes:
+                note_label = f"[{note.type}]"
+                if note.volume_id:
+                    note_label += f" 卷#{note.volume_id}"
+                if note.chapter_number:
+                    note_label += f" 第{note.chapter_number}章"
+                notes_lines.append(f"{note_label} {note.title}：{note.content}")
+            author_notes_text = "\n".join(notes_lines)
+            logger.info(
+                "项目 %s 第 %s 章注入 %s 条作者备忘（自动 %d 条 + 手动选择 %d 条）",
+                project_id,
+                request.chapter_number,
+                len(all_notes),
+                len(auto_notes),
+                len(request.selected_note_ids or []),
+            )
+
+    # 获取选中的角色状态
+    if request.selected_state_ids:
+        state_repo = CharacterStateRepository(session)
+        selected_states = await state_repo.get_by_ids(request.selected_state_ids)
+        if selected_states:
+            # 获取角色名称
+            from sqlalchemy import select as sql_select
+            from ...models.novel import BlueprintCharacter
+            char_ids = [s.character_id for s in selected_states]
+            char_stmt = sql_select(BlueprintCharacter).where(BlueprintCharacter.id.in_(char_ids))
+            char_result = await session.execute(char_stmt)
+            char_map = {c.id: c.name for c in char_result.scalars().all()}
+
+            states_lines = []
+            for state in selected_states:
+                char_name = char_map.get(state.character_id, "未知角色")
+                state_data = state.data or {}
+                # 格式化状态数据
+                state_parts = []
+                for key, value in state_data.items():
+                    if isinstance(value, list):
+                        state_parts.append(f"{key}: {', '.join(str(v) for v in value)}")
+                    elif isinstance(value, dict):
+                        state_parts.append(f"{key}: {json.dumps(value, ensure_ascii=False)}")
+                    else:
+                        state_parts.append(f"{key}: {value}")
+                state_str = " | ".join(state_parts) if state_parts else "无状态数据"
+                states_lines.append(f"【{char_name}】(第{state.chapter_number}章): {state_str}")
+            character_states_text = "\n".join(states_lines)
+            logger.info(
+                "项目 %s 第 %s 章注入 %s 条角色状态",
+                project_id,
+                request.chapter_number,
+                len(selected_states),
+            )
+
+    # 记录生成上下文（用于复现）
+    if request.selected_note_ids or request.selected_state_ids:
+        gen_context = GenerationContext(
+            chapter_id=chapter.id,
+            selected_note_ids=request.selected_note_ids,
+            selected_state_ids=request.selected_state_ids,
+            extra_instruction=request.writing_notes,
+        )
+        session.add(gen_context)
+        await session.flush()
+
     prompt_sections = [
         ("[世界蓝图](JSON)", blueprint_text),
         ("[当前所在卷]", current_volume_info),
         ("[本章伏笔任务]", relevant_foreshadowing_text),
+        # 注入作者备忘录和角色状态
+        ("[作者备忘录]", author_notes_text if author_notes_text else None),
+        ("[角色当前状态]", character_states_text if character_states_text else None),
         # ("[前情摘要]", completed_section),
         ("[上一章摘要]", previous_summary_text),
         ("[上一章结尾]", previous_tail_excerpt),

@@ -31,6 +31,17 @@
           <!-- Right: Actions -->
           <div class="flex items-center gap-2 flex-shrink-0">
             <button
+              class="p-2 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all duration-200"
+              :class="{ 'animate-spin': isRefreshing }"
+              :disabled="isRefreshing"
+              @click="refreshCurrentSection"
+              title="刷新当前模块"
+            >
+              <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            </button>
+            <button
               v-if="!isAdmin"
               class="px-3 py-2 text-sm font-medium text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded-lg transition-all duration-200 flex items-center gap-2"
               @click="gmPanelStore.openPanel()"
@@ -266,12 +277,13 @@ import ChapterOutlineSection from '@/components/novel-detail/ChapterOutlineSecti
 import ChaptersSection from '@/components/novel-detail/ChaptersSection.vue'
 import VolumeSection from '@/components/novel-detail/VolumeSection.vue'
 import ForeshadowingSection from '@/components/novel-detail/ForeshadowingSection.vue'
+import AuthorNotesSection from '@/components/novel-detail/AuthorNotesSection.vue'
 
 interface Props {
   isAdmin?: boolean
 }
 
-type SectionKey = NovelSectionType
+type SectionKey = NovelSectionType | 'author_notes'
 
 const props = withDefaults(defineProps<Props>(), {
   isAdmin: false
@@ -293,6 +305,7 @@ const sections: Array<{ key: SectionKey; label: string; description: string }> =
   { key: 'volumes', label: '卷结构', description: '长篇卷/篇章划分' },
   { key: 'foreshadowing', label: '伏笔系统', description: '伏笔埋设与回收' },
   { key: 'chapter_outline', label: '章节大纲', description: props.isAdmin ? '故事章节规划' : '故事结构规划' },
+  { key: 'author_notes', label: '作者备忘', description: '写作笔记与角色状态' },
   { key: 'chapters', label: '章节内容', description: props.isAdmin ? '生成章节与正文' : '生成状态与摘要' }
 ]
 
@@ -304,6 +317,7 @@ const sectionComponents: Record<SectionKey, any> = {
   volumes: VolumeSection,
   foreshadowing: ForeshadowingSection,
   chapter_outline: ChapterOutlineSection,
+  author_notes: AuthorNotesSection,
   chapters: ChaptersSection
 }
 
@@ -347,6 +361,10 @@ const getSectionIcon = (key: SectionKey) => {
       h('circle', { cx: 12, cy: 12, r: 3 }),
       h('path', { d: 'M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42' })
     ]),
+    author_notes: () => h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2 }, [
+      h('path', { d: 'M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z' }),
+      h('path', { d: 'M14 2v6h6M16 13H8M16 17H8M10 9H8' })
+    ]),
     chapters: () => h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2 }, [
       h('path', { d: 'M4 19.5A2.5 2.5 0 016.5 17H20' }),
       h('path', { d: 'M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z' })
@@ -364,6 +382,7 @@ const sectionLoading = reactive<Record<SectionKey, boolean>>({
   volumes: false,
   foreshadowing: false,
   chapter_outline: false,
+  author_notes: false,
   chapters: false
 })
 const sectionError = reactive<Record<SectionKey, string | null>>({
@@ -374,6 +393,7 @@ const sectionError = reactive<Record<SectionKey, string | null>>({
   volumes: null,
   foreshadowing: null,
   chapter_outline: null,
+  author_notes: null,
   chapters: null
 })
 
@@ -383,6 +403,7 @@ const overviewMeta = reactive<{ title: string; updated_at: string | null }>({
 })
 
 const activeSection = ref<SectionKey>('overview')
+const isRefreshing = ref(false)
 
 // Modal state (user mode only)
 const isModalOpen = ref(false)
@@ -438,6 +459,8 @@ const handleResize = () => {
 
 const loadSection = async (section: SectionKey, force = false, silent = false) => {
   if (!projectId) return
+  // author_notes 组件自己管理数据加载，跳过
+  if (section === 'author_notes') return
   if (!force && sectionData[section]) {
     return
   }
@@ -467,6 +490,19 @@ const reloadSection = (section: SectionKey, force = false) => {
   loadSection(section, force)
 }
 
+const refreshCurrentSection = async () => {
+  isRefreshing.value = true
+  try {
+    await loadSection(activeSection.value, true)
+    // 同时刷新 overview 以更新顶部时间
+    if (activeSection.value !== 'overview') {
+      await loadSection('overview', true, true)
+    }
+  } finally {
+    isRefreshing.value = false
+  }
+}
+
 const switchSection = (section: SectionKey) => {
   activeSection.value = section
   if (typeof window !== 'undefined' && window.innerWidth < 1024) {
@@ -475,6 +511,11 @@ const switchSection = (section: SectionKey) => {
   loadSection(section)
   // chapter_outline 和 chapters 依赖 volumes 数据
   if (section === 'chapter_outline' || section === 'chapters') {
+    loadSection('volumes')
+  }
+  // author_notes 需要 characters 和 volumes 数据（用于下拉列表）
+  if (section === 'author_notes') {
+    loadSection('characters')
     loadSection('volumes')
   }
 }
@@ -518,6 +559,21 @@ const componentProps = computed(() => {
       const volumesData = sectionData.volumes
       const volumes = volumesData?.volumes || []
       return { outline: data?.chapter_outline || [], volumes, editable }
+    }
+    case 'author_notes': {
+      // author_notes 组件自己处理数据加载，只需传入 projectId 和 editable
+      const charactersData = sectionData.characters
+      const characters = (charactersData?.characters || []).map((c: any) => ({
+        id: c.id,
+        name: c.name
+      }))
+      const volumesData = sectionData.volumes
+      const volumes = (volumesData?.volumes || []).map((v: any) => ({
+        id: v.id,
+        title: v.title,
+        volume_number: v.volume_number
+      }))
+      return { projectId, editable, characters, volumes }
     }
     case 'chapters': {
       // 获取卷结构数据传给章节组件
@@ -727,10 +783,10 @@ watch(
     if (!oldProject) return
 
     console.log('[NovelDetailShell] currentProject changed, refreshing sections')
-    // 刷新所有已加载的 section
+    // 刷新所有已加载的 section（静默刷新，不显示 loading）
     const loadedSections = Object.keys(sectionData) as SectionKey[]
     for (const section of loadedSections) {
-      loadSection(section, true)
+      loadSection(section, true, true)
     }
   }
 )

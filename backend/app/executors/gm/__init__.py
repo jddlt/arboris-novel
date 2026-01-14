@@ -15,6 +15,7 @@ from . import blueprint
 from . import volume
 from . import foreshadowing
 from . import signal
+from . import author_notes
 
 __all__ = [
     "BaseToolExecutor",

@@ -1,18 +1,17 @@
 """GM Agent API 路由。
 
 提供 GM Agent 对话和操作管理的 HTTP 接口。
+对话功能已迁移至 WebSocket。
 """
 
-import json
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...core.dependencies import get_current_user
+from ...core.dependencies import get_current_user, get_current_user_ws
 from ...db.session import get_session
 from ...schemas.user import UserInDB
 from ...services.gm.gm_service import GMService
@@ -23,40 +22,6 @@ router = APIRouter(prefix="/api/novels/{project_id}/gm", tags=["GM Agent"])
 
 
 # ==================== Request/Response Schemas ====================
-
-
-class ImagePayload(BaseModel):
-    """图片数据。"""
-
-    base64: str = Field(..., description="图片的 base64 编码数据")
-    mime_type: str = Field(..., description="图片 MIME 类型，如 image/png, image/jpeg")
-
-
-class GMChatRequest(BaseModel):
-    """GM 对话请求。"""
-
-    message: str = Field("", max_length=10000, description="用户消息")
-    conversation_id: Optional[str] = Field(None, description="对话 ID，不传则创建新对话")
-    enable_web_search: bool = Field(False, description="是否启用联网搜索（仅 Gemini 模型支持）")
-    images: Optional[List[ImagePayload]] = Field(None, max_length=4, description="附带的图片列表（最多4张）")
-
-
-class PendingActionResponse(BaseModel):
-    """待执行操作响应。"""
-
-    action_id: str
-    tool_name: str
-    params: Dict[str, Any]
-    preview: str
-    status: str = "pending"
-
-
-class GMChatResponse(BaseModel):
-    """GM 对话响应。"""
-
-    conversation_id: str
-    message: str
-    pending_actions: List[PendingActionResponse]
 
 
 class ApplyActionsRequest(BaseModel):
@@ -117,140 +82,6 @@ class ConversationDetail(BaseModel):
 
 
 # ==================== API Endpoints ====================
-
-
-@router.post("/chat", response_model=GMChatResponse)
-async def chat_with_gm(
-    project_id: str,
-    request: GMChatRequest,
-    session: AsyncSession = Depends(get_session),
-    current_user: UserInDB = Depends(get_current_user),
-) -> GMChatResponse:
-    """与 GM Agent 对话。
-
-    发送消息给 GM，GM 会分析意图并返回响应。
-    如果 GM 决定执行修改操作，会返回待确认的操作列表。
-
-    Args:
-        project_id: 小说项目 ID
-        request: 对话请求
-
-    Returns:
-        GM 响应，包含消息和待执行操作
-    """
-    from ...services.novel_service import NovelService
-
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
-
-    gm_service = GMService(session)
-
-    logger.info(
-        "GM 对话请求: project_id=%s, user_id=%s, conversation_id=%s, message_len=%d",
-        project_id,
-        current_user.id,
-        request.conversation_id,
-        len(request.message),
-    )
-
-    response = await gm_service.chat(
-        project_id=project_id,
-        message=request.message,
-        conversation_id=request.conversation_id,
-        user_id=current_user.id,
-        enable_web_search=request.enable_web_search,
-    )
-
-    return GMChatResponse(
-        conversation_id=response.conversation_id,
-        message=response.message,
-        pending_actions=[
-            PendingActionResponse(
-                action_id=a.action_id,
-                tool_name=a.tool_name,
-                params=a.params,
-                preview=a.preview,
-                status=a.status,
-            )
-            for a in response.pending_actions
-        ],
-    )
-
-
-@router.post("/chat/stream")
-async def stream_chat_with_gm(
-    project_id: str,
-    request: GMChatRequest,
-    session: AsyncSession = Depends(get_session),
-    current_user: UserInDB = Depends(get_current_user),
-) -> StreamingResponse:
-    """与 GM Agent 流式对话（SSE）。
-
-    使用 Server-Sent Events 流式返回 GM 响应，适用于需要实时显示的场景。
-
-    事件类型：
-    - start: {"conversation_id": "..."} 对话开始
-    - content: {"content": "..."} 内容片段
-    - pending_actions: {"actions": [...]} 待执行操作
-    - done: {"conversation_id": "...", "message": "..."} 完成
-    - error: {"error": "..."} 错误
-
-    Args:
-        project_id: 小说项目 ID
-        request: 对话请求
-
-    Returns:
-        SSE 流式响应
-    """
-    from ...services.novel_service import NovelService
-
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
-
-    gm_service = GMService(session)
-
-    logger.info(
-        "GM 流式对话请求: project_id=%s, user_id=%s, conversation_id=%s, message_len=%d, images=%d",
-        project_id,
-        current_user.id,
-        request.conversation_id,
-        len(request.message),
-        len(request.images) if request.images else 0,
-    )
-
-    # 转换图片数据为字典格式
-    images_data = None
-    if request.images:
-        images_data = [{"base64": img.base64, "mime_type": img.mime_type} for img in request.images]
-
-    async def event_generator():
-        """SSE 事件生成器。"""
-        try:
-            async for event in gm_service.stream_chat(
-                project_id=project_id,
-                message=request.message,
-                conversation_id=request.conversation_id,
-                user_id=current_user.id,
-                enable_web_search=request.enable_web_search,
-                images=images_data,
-            ):
-                event_type = event.get("type", "message")
-                event_data = json.dumps(event, ensure_ascii=False)
-                yield f"event: {event_type}\ndata: {event_data}\n\n"
-        except Exception as e:
-            logger.error("SSE 流异常: %s", e, exc_info=True)
-            error_event = json.dumps({"type": "error", "error": str(e)}, ensure_ascii=False)
-            yield f"event: error\ndata: {error_event}\n\n"
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",  # 禁用 nginx 缓冲
-        },
-    )
 
 
 @router.post("/apply", response_model=ApplyActionsResponse)
@@ -340,88 +171,6 @@ async def discard_actions(
     count = await gm_service.discard_actions(action_ids=request.action_ids)
 
     return DiscardActionsResponse(discarded_count=count)
-
-
-class ActionResultItem(BaseModel):
-    """单个操作执行结果。"""
-
-    action_id: str = Field(..., description="操作 ID")
-    success: bool = Field(..., description="是否成功")
-    message: str = Field(..., description="执行结果消息")
-
-
-class ContinueChatRequest(BaseModel):
-    """继续对话请求。"""
-
-    conversation_id: str = Field(..., description="对话 ID")
-    action_results: List[ActionResultItem] = Field(..., description="操作执行结果列表")
-    enable_web_search: bool = Field(False, description="是否启用联网搜索")
-
-
-@router.post("/chat/continue")
-async def continue_chat_with_gm(
-    project_id: str,
-    request: ContinueChatRequest,
-    session: AsyncSession = Depends(get_session),
-    current_user: UserInDB = Depends(get_current_user),
-) -> StreamingResponse:
-    """在应用操作后继续对话（SSE）。
-
-    当 Agent 返回 awaiting_confirmation=True 且用户应用了操作后，
-    调用此接口让 Agent 继续思考和执行任务。
-
-    Args:
-        project_id: 小说项目 ID
-        request: 继续对话请求
-
-    Returns:
-        SSE 流式响应
-    """
-    from ...services.novel_service import NovelService
-
-    novel_service = NovelService(session)
-    await novel_service.ensure_project_owner(project_id, current_user.id)
-
-    gm_service = GMService(session)
-
-    logger.info(
-        "GM 继续对话: project_id=%s, user_id=%s, conversation_id=%s, results=%d",
-        project_id,
-        current_user.id,
-        request.conversation_id,
-        len(request.action_results),
-    )
-
-    # 转换为字典列表
-    action_results = [r.model_dump() for r in request.action_results]
-
-    async def event_generator():
-        """SSE 事件生成器。"""
-        try:
-            async for event in gm_service.continue_chat(
-                project_id=project_id,
-                conversation_id=request.conversation_id,
-                action_results=action_results,
-                user_id=current_user.id,
-                enable_web_search=request.enable_web_search,
-            ):
-                event_type = event.get("type", "message")
-                event_data = json.dumps(event, ensure_ascii=False)
-                yield f"event: {event_type}\ndata: {event_data}\n\n"
-        except Exception as e:
-            logger.error("SSE 流异常: %s", e, exc_info=True)
-            error_event = json.dumps({"type": "error", "error": str(e)}, ensure_ascii=False)
-            yield f"event: error\ndata: {error_event}\n\n"
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
 
 
 @router.get("/conversations", response_model=List[ConversationSummary])
@@ -542,6 +291,76 @@ async def archive_conversation(
     )
 
 
+class TruncateConversationRequest(BaseModel):
+    """截断对话请求。"""
+
+    keep_count: int = Field(..., ge=0, description="保留的消息数量（从开头算起）")
+
+
+class TruncateConversationResponse(BaseModel):
+    """截断对话响应。"""
+
+    deleted_count: int
+
+
+@router.post("/conversations/{conversation_id}/truncate", response_model=TruncateConversationResponse)
+async def truncate_conversation(
+    project_id: str,
+    conversation_id: str,
+    request: TruncateConversationRequest,
+    session: AsyncSession = Depends(get_session),
+    current_user: UserInDB = Depends(get_current_user),
+) -> TruncateConversationResponse:
+    """截断对话消息（回溯功能）。
+
+    保留前 N 条消息，删除后续所有消息。用于对话回溯。
+
+    Args:
+        project_id: 小说项目 ID
+        conversation_id: 对话 ID
+        request: 截断参数
+
+    Returns:
+        被删除的消息数量
+    """
+    from ...services.novel_service import NovelService
+
+    novel_service = NovelService(session)
+    await novel_service.ensure_project_owner(project_id, current_user.id)
+
+    gm_service = GMService(session)
+
+    detail = await gm_service.get_conversation_detail(conversation_id)
+
+    if not detail:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"对话 {conversation_id} 不存在",
+        )
+
+    if detail["project_id"] != project_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="无权操作此对话",
+        )
+
+    deleted_count = await gm_service.gm_repo.conversations.truncate_messages(
+        conversation_id, request.keep_count
+    )
+    await session.commit()
+
+    logger.info(
+        "GM 截断对话: project_id=%s, user_id=%s, conversation_id=%s, keep=%d, deleted=%d",
+        project_id,
+        current_user.id,
+        conversation_id,
+        request.keep_count,
+        deleted_count,
+    )
+
+    return TruncateConversationResponse(deleted_count=deleted_count)
+
+
 # ==================== WebSocket Endpoint ====================
 
 
@@ -550,10 +369,13 @@ async def gm_websocket(
     websocket: "WebSocket",
     project_id: str,
     session: AsyncSession = Depends(get_session),
+    current_user: Optional[UserInDB] = Depends(get_current_user_ws),
 ):
     """GM Agent WebSocket 端点。
 
     支持同步确认的双向通信。
+
+    认证：通过 URL 参数 ?token=xxx 传递 JWT token。
 
     消息协议：
     客户端 -> 服务端：
@@ -572,10 +394,28 @@ async def gm_websocket(
     - {"type": "error", "error": "..."}
     """
     from ...schemas.gm_websocket import make_connected, make_error
+    from ...services.novel_service import NovelService
 
     await websocket.accept()
 
-    logger.info("GM WebSocket 连接: project_id=%s", project_id)
+    # 认证检查
+    if not current_user:
+        logger.warning("GM WebSocket 认证失败: project_id=%s", project_id)
+        await websocket.send_json(make_error("未授权：请提供有效的 token", recoverable=False))
+        await websocket.close(code=4001, reason="Unauthorized")
+        return
+
+    # 权限检查：确保用户拥有该项目
+    try:
+        novel_service = NovelService(session)
+        await novel_service.ensure_project_owner(project_id, current_user.id)
+    except HTTPException as e:
+        logger.warning("GM WebSocket 权限不足: project_id=%s, user_id=%s", project_id, current_user.id)
+        await websocket.send_json(make_error(f"无权访问此项目: {e.detail}", recoverable=False))
+        await websocket.close(code=4003, reason="Forbidden")
+        return
+
+    logger.info("GM WebSocket 连接: project_id=%s, user_id=%s", project_id, current_user.id)
 
     gm_service = GMService(session)
 
@@ -598,6 +438,7 @@ async def gm_websocket(
                 message = data.get("message", "")
                 conversation_id = data.get("conversation_id")
                 images = data.get("images")
+                enable_web_search = data.get("enable_web_search", False)
 
                 if not message.strip():
                     await websocket.send_json(make_error("消息不能为空"))
@@ -609,8 +450,9 @@ async def gm_websocket(
                     project_id=project_id,
                     message=message,
                     conversation_id=conversation_id,
-                    user_id=None,  # WebSocket 暂不支持用户认证
+                    user_id=current_user.id,  # 现在有用户 ID 了
                     images=images,
+                    enable_web_search=enable_web_search,
                 )
 
             elif msg_type == "ping":
@@ -620,7 +462,7 @@ async def gm_websocket(
                 logger.warning("未知消息类型: %s", msg_type)
 
     except WebSocketDisconnect:
-        logger.info("GM WebSocket 断开: project_id=%s", project_id)
+        logger.info("GM WebSocket 断开: project_id=%s, user_id=%s", project_id, current_user.id)
     except Exception as e:
         logger.error("GM WebSocket 异常: project_id=%s, error=%s", project_id, e, exc_info=True)
         try:
