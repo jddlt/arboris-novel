@@ -285,7 +285,7 @@
               <div v-if="msg.actions && msg.actions.length > 0" class="mt-3 space-y-2">
                 <div
                   v-for="action in msg.actions"
-                  :key="action.action_id"
+                  :key="action.id"
                   class="bg-gray-50 rounded-lg p-2.5 border border-gray-200"
                 >
                   <div class="flex items-start justify-between gap-2">
@@ -295,13 +295,13 @@
                         <!-- 展开/收起按钮 -->
                         <button
                           v-if="action.params && Object.keys(action.params).length > 0"
-                          @click="toggleActionDetails(action.action_id)"
+                          @click="toggleActionDetails(action.id)"
                           class="p-0.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
-                          :title="expandedActions.has(action.action_id) ? '收起详情' : '展开详情'"
+                          :title="expandedActions.has(action.id) ? '收起详情' : '展开详情'"
                         >
                           <svg
                             class="w-3 h-3 transition-transform"
-                            :class="{ 'rotate-180': expandedActions.has(action.action_id) }"
+                            :class="{ 'rotate-180': expandedActions.has(action.id) }"
                             fill="none"
                             stroke="currentColor"
                             viewBox="0 0 24 24"
@@ -350,7 +350,7 @@
                     leave-from-class="opacity-100 max-h-96"
                   >
                     <div
-                      v-if="expandedActions.has(action.action_id) && action.params && Object.keys(action.params).length > 0"
+                      v-if="expandedActions.has(action.id) && action.params && Object.keys(action.params).length > 0"
                       class="mt-2 pt-2 border-t border-gray-100 space-y-1 overflow-hidden"
                     >
                       <div
@@ -446,7 +446,7 @@
             <div class="text-sm font-medium text-gray-700 mb-2">待确认操作：</div>
             <div
               v-for="action in pendingConfirm.actions"
-              :key="action.action_id"
+              :key="action.id"
               class="bg-gray-50 rounded-lg p-2.5 border border-gray-200"
             >
               <div class="flex items-start justify-between gap-2">
@@ -456,13 +456,13 @@
                     <!-- 展开/收起按钮 -->
                     <button
                       v-if="action.params && Object.keys(action.params).length > 0"
-                      @click="toggleActionDetails(action.action_id)"
+                      @click="toggleActionDetails(action.id)"
                       class="p-0.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
-                      :title="expandedActions.has(action.action_id) ? '收起详情' : '展开详情'"
+                      :title="expandedActions.has(action.id) ? '收起详情' : '展开详情'"
                     >
                       <svg
                         class="w-3 h-3 transition-transform"
-                        :class="{ 'rotate-180': expandedActions.has(action.action_id) }"
+                        :class="{ 'rotate-180': expandedActions.has(action.id) }"
                         fill="none"
                         stroke="currentColor"
                         viewBox="0 0 24 24"
@@ -511,7 +511,7 @@
                 leave-from-class="opacity-100 max-h-96"
               >
                 <div
-                  v-if="expandedActions.has(action.action_id) && action.params && Object.keys(action.params).length > 0"
+                  v-if="expandedActions.has(action.id) && action.params && Object.keys(action.params).length > 0"
                   class="mt-2 pt-2 border-t border-gray-100 space-y-1 max-h-64 overflow-y-auto"
                 >
                   <div
@@ -1050,10 +1050,12 @@ async function selectConversation(conv: ConversationSummary) {
 
       if (msg.executed_tools && msg.executed_tools.length > 0) {
         // executed_tools 格式与前端 ToolExecution 一致
-        tools = msg.executed_tools.map((t: { tool_name: string; params?: Record<string, unknown>; status: string; message?: string; preview?: string }) => ({
+        tools = msg.executed_tools.map((t: { tool_name: string; params?: Record<string, unknown>; status: string; message?: string; preview?: string }, idx: number) => ({
+          id: `tool_${idx}`,
           tool_name: t.tool_name,
           params: t.params || {},
           status: t.status as 'executing' | 'success' | 'failed',
+          requires_confirmation: false,
           message: t.message,
           preview: t.preview,
         }))
@@ -1068,15 +1070,18 @@ async function selectConversation(conv: ConversationSummary) {
           params: a.params,
           preview: a.preview || '',
           is_dangerous: false,
+          requires_confirmation: true,
           status: a.status as 'pending' | 'approved' | 'rejected' | 'applied' | 'failed',
         }))
 
         // 如果没有 executed_tools，将 actions 转换为 tools 显示
         if (!tools) {
-          tools = msg.actions.map((a: { tool_name: string; params: Record<string, unknown>; status: string; preview?: string }) => ({
+          tools = msg.actions.map((a: { action_id: string; tool_name: string; params: Record<string, unknown>; status: string; preview?: string }) => ({
+            id: a.action_id,
             tool_name: a.tool_name,
             params: a.params,
             status: a.status as 'executing' | 'success' | 'failed',
+            requires_confirmation: true,
             preview: a.preview
           }))
         }
